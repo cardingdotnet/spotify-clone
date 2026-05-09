@@ -31,13 +31,17 @@ export default function AudioPlayer() {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
 
+    const trackId = currentTrack.id;
     let cancelled = false;
     setLoading(true);
 
     async function loadTrack() {
+      // audio is guaranteed non-null inside this closure (captured above)
+      const audioEl = audio!;
+      
       try {
         // Get the resolved stream URL from our backend
-        const resolveUrl = `/api/stream-resolve/${currentTrack!.id}?format=json`;
+        const resolveUrl = `/api/stream-resolve/${trackId}?format=json`;
         const res = await fetch(resolveUrl);
         
         if (!res.ok) {
@@ -54,11 +58,11 @@ export default function AudioPlayer() {
           hlsRef.current = null;
         }
 
-        if (type === 'hls' && audio) {
-          // HLS stream — use hls.js
-          // Native HLS support in Safari
-          if (audio.canPlayType('application/vnd.apple.mpegurl')) {
-            audio.src = url;
+        if (type === 'hls') {
+          // HLS stream
+          if (audioEl.canPlayType('application/vnd.apple.mpegurl')) {
+            // Native HLS support (Safari)
+            audioEl.src = url;
           } else {
             // Use hls.js for other browsers
             const Hls = (await import('hls.js')).default;
@@ -70,7 +74,7 @@ export default function AudioPlayer() {
               });
               
               hls.loadSource(url);
-              hls.attachMedia(audio);
+              hls.attachMedia(audioEl);
               hlsRef.current = hls;
               
               hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -92,12 +96,13 @@ export default function AudioPlayer() {
                 }
               });
             } else {
-              audio.src = url;
+              // Last resort: try direct src (won't work in most browsers)
+              audioEl.src = url;
             }
           }
         } else {
-          // Progressive stream (MP3)
-          audio.src = url;
+          // Progressive stream (MP3) — direct playback
+          audioEl.src = url;
         }
         
         if (cancelled) return;
@@ -105,7 +110,7 @@ export default function AudioPlayer() {
         // Try to play
         if (isPlaying) {
           try {
-            await audio.play();
+            await audioEl.play();
           } catch (err: any) {
             // Autoplay blocked — common on first interaction
             if (err.name === 'NotAllowedError') {
@@ -124,7 +129,6 @@ export default function AudioPlayer() {
           toast.error('Failed to load track. Skipping...');
           setLoading(false);
           setPlaying(false);
-          // Try next track after a short delay
           setTimeout(() => next(), 1500);
         }
       }
@@ -144,7 +148,7 @@ export default function AudioPlayer() {
     if (!audio || !currentTrack) return;
     
     if (isPlaying && audio.paused) {
-      audio.play().catch(err => {
+      audio.play().catch((err: any) => {
         console.error('Play failed:', err);
         if (err.name === 'NotAllowedError') {
           toast.error('Browser blocked autoplay. Click play to start.');
@@ -173,7 +177,6 @@ export default function AudioPlayer() {
     const audio = audioRef.current;
     if (!audio) return;
     
-    // Only seek if user explicitly set time (not from timeupdate)
     if (Math.abs(audio.currentTime - seekTime) > 1.5 && !isSeekingRef.current) {
       isSeekingRef.current = true;
       audio.currentTime = seekTime;
@@ -183,7 +186,6 @@ export default function AudioPlayer() {
     }
   }, [seekTime]);
 
-  // Audio element event handlers
   function handleTimeUpdate() {
     const audio = audioRef.current;
     if (audio && !isSeekingRef.current) {
