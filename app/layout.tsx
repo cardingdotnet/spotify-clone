@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import { Toaster } from 'react-hot-toast';
 import './globals.css';
@@ -11,9 +11,14 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'Wavestream — Stream Anywhere',
   description: 'Build your playlist, share your stream URL anywhere',
-  icons: {
-    icon: '/favicon.svg',
-  },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: '#121212',
 };
 
 export default function RootLayout({
@@ -26,12 +31,13 @@ export default function RootLayout({
       <body className="bg-spotify-black text-white antialiased">
         {children}
         <Toaster
-          position="bottom-center"
+          position="top-center"
           toastOptions={{
             style: {
               background: '#282828',
               color: '#fff',
               border: '1px solid #3E3E3E',
+              fontSize: '14px',
             },
             success: {
               iconTheme: {

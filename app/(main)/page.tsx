@@ -14,7 +14,7 @@ export default async function HomePage() {
 
   const { data: playlists } = await supabase
     .from('playlists')
-    .select('id, name, cover_url, play_count, stream_token')
+    .select('id, name, cover_url, play_count, short_code')
     .eq('user_id', user!.id)
     .order('updated_at', { ascending: false })
     .limit(6);
@@ -23,56 +23,54 @@ export default async function HomePage() {
   const name = profile?.display_name || profile?.username || 'there';
 
   return (
-    <div className="p-8">
-      <h1 className="text-4xl font-bold mb-8">
+    <div className="p-4 sm:p-8">
+      <h1 className="text-2xl sm:text-4xl font-bold mb-6 sm:mb-8">
         {greeting}, {name} 👋
       </h1>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-8 sm:mb-12">
         <Link
           href="/search"
-          className="bg-gradient-to-br from-purple-600 to-blue-600 p-6 rounded-lg hover:scale-[1.02] transition-transform"
+          className="bg-gradient-to-br from-purple-600 to-blue-600 p-4 sm:p-6 rounded-lg hover:scale-[1.02] transition-transform"
         >
-          <Music className="w-8 h-8 mb-3" />
-          <h3 className="font-bold text-lg">Discover Music</h3>
-          <p className="text-sm opacity-90 mt-1">
+          <Music className="w-6 h-6 sm:w-8 sm:h-8 mb-2 sm:mb-3" />
+          <h3 className="font-bold text-base sm:text-lg">Discover Music</h3>
+          <p className="text-xs sm:text-sm opacity-90 mt-1">
             Search SoundCloud&apos;s massive library
           </p>
         </Link>
 
         <Link
           href="/library"
-          className="bg-gradient-to-br from-spotify-green to-emerald-700 p-6 rounded-lg hover:scale-[1.02] transition-transform text-black"
+          className="bg-gradient-to-br from-spotify-green to-emerald-700 p-4 sm:p-6 rounded-lg hover:scale-[1.02] transition-transform text-black"
         >
-          <Headphones className="w-8 h-8 mb-3" />
-          <h3 className="font-bold text-lg">Your Playlists</h3>
-          <p className="text-sm opacity-90 mt-1">
+          <Headphones className="w-6 h-6 sm:w-8 sm:h-8 mb-2 sm:mb-3" />
+          <h3 className="font-bold text-base sm:text-lg">Your Playlists</h3>
+          <p className="text-xs sm:text-sm opacity-90 mt-1">
             {playlists?.length || 0} playlists ready to stream
           </p>
         </Link>
 
-        <div className="bg-gradient-to-br from-orange-500 to-pink-600 p-6 rounded-lg">
-          <Share2 className="w-8 h-8 mb-3" />
-          <h3 className="font-bold text-lg">Stream Anywhere</h3>
-          <p className="text-sm opacity-90 mt-1">
-            Each playlist gets a unique URL
+        <div className="bg-gradient-to-br from-orange-500 to-pink-600 p-4 sm:p-6 rounded-lg">
+          <Share2 className="w-6 h-6 sm:w-8 sm:h-8 mb-2 sm:mb-3" />
+          <h3 className="font-bold text-base sm:text-lg">Stream Anywhere</h3>
+          <p className="text-xs sm:text-sm opacity-90 mt-1">
+            Each playlist gets a short URL
           </p>
         </div>
       </div>
 
-      {/* Recent Playlists */}
       {playlists && playlists.length > 0 ? (
         <section>
-          <h2 className="text-2xl font-bold mb-4">Your Playlists</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          <h2 className="text-xl sm:text-2xl font-bold mb-4">Your Playlists</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
             {playlists.map((playlist) => (
               <Link
                 key={playlist.id}
                 href={`/playlist/${playlist.id}`}
                 className="card group"
               >
-                <div className="aspect-square bg-gradient-to-br from-spotify-light-gray to-spotify-lighter-gray rounded-md mb-3 flex items-center justify-center overflow-hidden">
+                <div className="aspect-square bg-gradient-to-br from-spotify-light-gray to-spotify-lighter-gray rounded-md mb-2 sm:mb-3 flex items-center justify-center overflow-hidden">
                   {playlist.cover_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -81,11 +79,11 @@ export default async function HomePage() {
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <Music className="w-12 h-12 text-spotify-text-gray" />
+                    <Music className="w-8 h-8 sm:w-12 sm:h-12 text-spotify-text-gray" />
                   )}
                 </div>
-                <h3 className="font-semibold truncate">{playlist.name}</h3>
-                <p className="text-sm text-spotify-text-gray mt-1">
+                <h3 className="font-semibold truncate text-sm sm:text-base">{playlist.name}</h3>
+                <p className="text-xs sm:text-sm text-spotify-text-gray mt-1">
                   {playlist.play_count} plays
                 </p>
               </Link>
@@ -93,12 +91,12 @@ export default async function HomePage() {
           </div>
         </section>
       ) : (
-        <section className="text-center py-16">
-          <div className="w-20 h-20 mx-auto bg-spotify-dark-gray rounded-full flex items-center justify-center mb-4">
-            <Plus className="w-10 h-10 text-spotify-text-gray" />
+        <section className="text-center py-12 sm:py-16">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto bg-spotify-dark-gray rounded-full flex items-center justify-center mb-4">
+            <Plus className="w-8 h-8 sm:w-10 sm:h-10 text-spotify-text-gray" />
           </div>
-          <h2 className="text-2xl font-bold mb-2">Create your first playlist</h2>
-          <p className="text-spotify-text-gray mb-6">
+          <h2 className="text-xl sm:text-2xl font-bold mb-2">Create your first playlist</h2>
+          <p className="text-spotify-text-gray mb-6 text-sm sm:text-base">
             Search music and build playlists you can stream anywhere
           </p>
           <Link href="/search" className="btn-primary inline-block">

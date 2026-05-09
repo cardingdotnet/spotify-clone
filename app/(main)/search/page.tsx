@@ -20,14 +20,9 @@ export default function SearchPage() {
   const [showPlaylistMenu, setShowPlaylistMenu] = useState<number | null>(null);
   
   const { 
-    currentTrack, 
-    isPlaying, 
-    playTrack, 
-    togglePlay, 
-    playQueue 
+    currentTrack, isPlaying, togglePlay, playQueue 
   } = usePlayerStore();
 
-  // Debounced search
   useEffect(() => {
     if (query.trim().length < 2) {
       setResults([]);
@@ -68,13 +63,11 @@ export default function SearchPage() {
   }, []);
 
   function handlePlay(track: Track, index: number) {
-    // If clicking on currently playing track — toggle play/pause
     if (currentTrack?.id === track.id) {
       togglePlay();
       return;
     }
     
-    // Convert Tracks to PlayerTracks for the queue
     const queue: PlayerTrack[] = results.map(t => ({
       id: t.id,
       title: t.title,
@@ -83,7 +76,6 @@ export default function SearchPage() {
       artworkUrl: t.artworkUrl,
     }));
     
-    // Play full search results as queue, starting at this index
     playQueue(queue, index);
   }
 
@@ -115,9 +107,8 @@ export default function SearchPage() {
   }
 
   return (
-    <div className="p-8">
-      {/* Search Bar */}
-      <div className="relative mb-8 max-w-xl">
+    <div className="p-4 sm:p-8">
+      <div className="relative mb-6 sm:mb-8 max-w-xl">
         <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-spotify-text-gray pointer-events-none" />
         <input
           type="text"
@@ -136,21 +127,22 @@ export default function SearchPage() {
       )}
 
       {!loading && query.length < 2 && (
-        <div className="text-center py-16 text-spotify-text-gray">
-          <Music className="w-16 h-16 mx-auto mb-4 opacity-50" />
+        <div className="text-center py-12 sm:py-16 text-spotify-text-gray">
+          <Music className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 opacity-50" />
           <p>Search SoundCloud&apos;s massive music library</p>
         </div>
       )}
 
       {!loading && query.length >= 2 && results.length === 0 && (
-        <div className="text-center py-16 text-spotify-text-gray">
+        <div className="text-center py-12 sm:py-16 text-spotify-text-gray">
           <p>No results for &quot;{query}&quot;</p>
         </div>
       )}
 
       {results.length > 0 && (
         <div className="space-y-1">
-          <div className="grid grid-cols-[auto,auto,1fr,auto,auto] gap-4 px-4 py-2 text-sm text-spotify-text-gray border-b border-spotify-light-gray">
+          {/* Desktop header */}
+          <div className="hidden sm:grid grid-cols-[auto,auto,1fr,auto,auto] gap-4 px-4 py-2 text-sm text-spotify-text-gray border-b border-spotify-light-gray">
             <span className="w-8">#</span>
             <span></span>
             <span>Title</span>
@@ -165,12 +157,12 @@ export default function SearchPage() {
             return (
               <div
                 key={track.id}
-                className={`grid grid-cols-[auto,auto,1fr,auto,auto] gap-4 px-4 py-2 hover:bg-spotify-light-gray rounded-md group items-center ${
+                className={`flex sm:grid sm:grid-cols-[auto,auto,1fr,auto,auto] gap-3 sm:gap-4 px-2 sm:px-4 py-2 hover:bg-spotify-light-gray rounded-md group items-center ${
                   isCurrentTrack ? 'bg-spotify-light-gray/50' : ''
                 }`}
               >
-                {/* Index / Play button */}
-                <div className="w-8 flex items-center justify-center">
+                {/* Index/Play (desktop only) */}
+                <div className="hidden sm:flex w-8 items-center justify-center">
                   <span className={`text-spotify-text-gray group-hover:hidden ${
                     isCurrentTrack ? 'hidden' : ''
                   }`}>
@@ -181,7 +173,6 @@ export default function SearchPage() {
                     className={`hidden group-hover:block ${
                       isCurrentTrack ? '!block' : ''
                     } text-white hover:scale-110 transition-transform`}
-                    title={showPause ? 'Pause' : 'Play'}
                   >
                     {showPause ? (
                       <Pause className="w-4 h-4" fill="currentColor" />
@@ -191,8 +182,11 @@ export default function SearchPage() {
                   </button>
                 </div>
 
-                {/* Artwork */}
-                <div className="w-12 h-12 rounded overflow-hidden bg-spotify-light-gray flex-shrink-0">
+                {/* Artwork (tap to play on mobile) */}
+                <button
+                  onClick={() => handlePlay(track, idx)}
+                  className="w-12 h-12 rounded overflow-hidden bg-spotify-light-gray flex-shrink-0 relative"
+                >
                   {track.artworkUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -205,27 +199,34 @@ export default function SearchPage() {
                       <Music className="w-6 h-6 text-spotify-text-gray" />
                     </div>
                   )}
-                </div>
+                  <div className="sm:hidden absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 active:opacity-100">
+                    {showPause ? (
+                      <Pause className="w-6 h-6 text-white" fill="currentColor" />
+                    ) : (
+                      <Play className="w-6 h-6 text-white ml-0.5" fill="currentColor" />
+                    )}
+                  </div>
+                </button>
 
-                {/* Title + Artist */}
-                <div className="min-w-0">
-                  <p className={`font-semibold truncate ${
+                <button
+                  onClick={() => handlePlay(track, idx)}
+                  className="min-w-0 text-left flex-1"
+                >
+                  <p className={`font-semibold truncate text-sm sm:text-base ${
                     isCurrentTrack ? 'text-spotify-green' : ''
                   }`}>
                     {track.title}
                   </p>
-                  <p className="text-sm text-spotify-text-gray truncate">
+                  <p className="text-xs sm:text-sm text-spotify-text-gray truncate">
                     {track.artist}
                   </p>
-                </div>
+                </button>
 
-                {/* Duration */}
-                <span className="text-sm text-spotify-text-gray">
+                <span className="hidden sm:inline text-sm text-spotify-text-gray">
                   {formatDuration(track.duration)}
                 </span>
 
-                {/* Add to playlist */}
-                <div className="relative">
+                <div className="relative flex-shrink-0">
                   <button
                     onClick={() => setShowPlaylistMenu(
                       showPlaylistMenu === track.id ? null : track.id

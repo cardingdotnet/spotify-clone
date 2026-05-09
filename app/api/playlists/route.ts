@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server';
-import { slugify, generateUniqueSlug } from '@/lib/utils/slug';
+import { generateUniqueShortCode } from '@/lib/utils/slug';
 
 export const runtime = 'nodejs';
 
-/**
- * GET /api/playlists - List user's playlists
- */
 export async function GET() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -20,6 +17,7 @@ export async function GET() {
     .select(`
       id,
       name,
+      short_code,
       slug,
       description,
       cover_url,
@@ -40,9 +38,6 @@ export async function GET() {
   return NextResponse.json({ playlists: data });
 }
 
-/**
- * POST /api/playlists - Create new playlist (auto-generates unique slug)
- */
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -74,23 +69,32 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Generate unique slug — admin client checks across ALL playlists (global uniqueness)
+  // Generate unique short code
   const admin = createAdminSupabaseClient();
-  const slug = await generateUniqueSlug(name, async (candidateSlug) => {
+  const shortCode = await generateUniqueShortCode(async (candidate) => {
     const { data } = await admin
       .from('playlists')
       .select('id')
-      .eq('slug', candidateSlug)
+      .eq('short_code', candidate)
       .maybeSingle();
     return !!data;
   });
+
+  // Also generate a basic slug for display
+  const slug = name.trim().toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^\u0600-\u06FFa-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 60) || 'playlist';
 
   const { data, error } = await supabase
     .from('playlists')
     .insert({
       user_id: user.id,
       name: name.trim(),
-      slug,
+      short_code: shortCode,
+      slug: `${slug}-${shortCode}`,  // for backward compat with slug column
       description: description?.trim() || null,
       is_public: Boolean(is_public),
     })

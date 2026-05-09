@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server';
-import { generateUniqueSlug } from '@/lib/utils/slug';
+import { createClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
-/**
- * GET /api/playlists/[id] - Get playlist with tracks
- */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -20,6 +16,7 @@ export async function GET(
       id,
       user_id,
       name,
+      short_code,
       slug,
       description,
       cover_url,
@@ -60,7 +57,7 @@ export async function GET(
 
   return NextResponse.json({
     playlist,
-    tracks: tracks?.map(t => ({
+    tracks: tracks?.map((t: any) => ({
       ...t.track,
       position: t.position,
       added_at: t.added_at,
@@ -69,7 +66,8 @@ export async function GET(
 }
 
 /**
- * PATCH /api/playlists/[id] - Update playlist (regenerates slug on rename)
+ * PATCH /api/playlists/[id]
+ * Rename playlist. Short code STAYS THE SAME (URL doesn't change).
  */
 export async function PATCH(
   request: NextRequest,
@@ -92,34 +90,9 @@ export async function PATCH(
 
   const updates: any = {};
   
-  // If name is being changed, regenerate slug too
   if (typeof body.name === 'string' && body.name.trim()) {
-    const newName = body.name.trim().substring(0, 100);
-    updates.name = newName;
-    
-    // Get current slug to check if name actually changed
-    const { data: current } = await supabase
-      .from('playlists')
-      .select('name, slug')
-      .eq('id', id)
-      .single();
-    
-    if (current && current.name !== newName) {
-      // Name changed — regenerate slug, excluding this playlist from uniqueness check
-      const admin = createAdminSupabaseClient();
-      const newSlug = await generateUniqueSlug(newName, async (candidateSlug) => {
-        const { data } = await admin
-          .from('playlists')
-          .select('id')
-          .eq('slug', candidateSlug)
-          .neq('id', id)  // exclude current playlist
-          .maybeSingle();
-        return !!data;
-      });
-      updates.slug = newSlug;
-    }
+    updates.name = body.name.trim().substring(0, 100);
   }
-  
   if (typeof body.description === 'string') {
     updates.description = body.description.trim() || null;
   }
@@ -146,9 +119,6 @@ export async function PATCH(
   return NextResponse.json({ playlist: data });
 }
 
-/**
- * DELETE /api/playlists/[id]
- */
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -13,7 +13,7 @@ export default async function LibraryPage() {
       name, 
       cover_url, 
       play_count, 
-      stream_token,
+      short_code,
       created_at,
       tracks:playlist_tracks(count)
     `)
@@ -21,21 +21,21 @@ export default async function LibraryPage() {
     .order('updated_at', { ascending: false });
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-4xl font-bold">Your Library</h1>
-        <span className="text-spotify-text-gray">
+    <div className="p-4 sm:p-8">
+      <div className="flex items-center justify-between mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-4xl font-bold">Your Library</h1>
+        <span className="text-sm sm:text-base text-spotify-text-gray">
           {playlists?.length || 0} playlists
         </span>
       </div>
 
       {!playlists || playlists.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="w-20 h-20 mx-auto bg-spotify-dark-gray rounded-full flex items-center justify-center mb-4">
-            <Plus className="w-10 h-10 text-spotify-text-gray" />
+        <div className="text-center py-12 sm:py-16">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto bg-spotify-dark-gray rounded-full flex items-center justify-center mb-4">
+            <Plus className="w-8 h-8 sm:w-10 sm:h-10 text-spotify-text-gray" />
           </div>
-          <h2 className="text-2xl font-bold mb-2">Create your first playlist</h2>
-          <p className="text-spotify-text-gray mb-6">
+          <h2 className="text-xl sm:text-2xl font-bold mb-2">Create your first playlist</h2>
+          <p className="text-spotify-text-gray mb-6 text-sm sm:text-base">
             Use the + button in the sidebar to create one
           </p>
           <Link href="/search" className="btn-primary inline-block">
@@ -43,7 +43,7 @@ export default async function LibraryPage() {
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
           {playlists.map((playlist) => {
             const trackCount = (playlist.tracks as any)?.[0]?.count || 0;
             
@@ -53,7 +53,7 @@ export default async function LibraryPage() {
                 href={`/playlist/${playlist.id}`}
                 className="card group"
               >
-                <div className="aspect-square bg-gradient-to-br from-spotify-light-gray to-spotify-lighter-gray rounded-md mb-3 flex items-center justify-center overflow-hidden">
+                <div className="aspect-square bg-gradient-to-br from-spotify-light-gray to-spotify-lighter-gray rounded-md mb-2 sm:mb-3 flex items-center justify-center overflow-hidden">
                   {playlist.cover_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -62,11 +62,11 @@ export default async function LibraryPage() {
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <Music className="w-12 h-12 text-spotify-text-gray" />
+                    <Music className="w-8 h-8 sm:w-12 sm:h-12 text-spotify-text-gray" />
                   )}
                 </div>
-                <h3 className="font-semibold truncate">{playlist.name}</h3>
-                <p className="text-sm text-spotify-text-gray mt-1">
+                <h3 className="font-semibold truncate text-sm sm:text-base">{playlist.name}</h3>
+                <p className="text-xs sm:text-sm text-spotify-text-gray mt-1 truncate">
                   {trackCount} {trackCount === 1 ? 'track' : 'tracks'}
                 </p>
               </Link>

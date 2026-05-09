@@ -6,54 +6,64 @@
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
   }
   
   body {
     @apply bg-spotify-black text-white;
+    overscroll-behavior: none;
+  }
+  
+  /* Better touch targets on mobile */
+  button {
+    -webkit-tap-highlight-color: transparent;
   }
 }
 
 @layer components {
   .btn-primary {
     @apply bg-spotify-green hover:bg-spotify-green-hover text-black font-bold 
-           px-8 py-3 rounded-full transition-all hover:scale-105 active:scale-95;
+           px-6 sm:px-8 py-2.5 sm:py-3 rounded-full transition-all 
+           hover:scale-105 active:scale-95 text-sm sm:text-base;
   }
   
   .btn-secondary {
     @apply bg-transparent border border-spotify-text-light text-white 
-           hover:border-white hover:scale-105 px-6 py-2 rounded-full 
-           transition-all font-semibold;
+           hover:border-white hover:scale-105 px-4 sm:px-6 py-2 rounded-full 
+           transition-all font-semibold text-sm sm:text-base;
   }
   
   .card {
     @apply bg-spotify-dark-gray hover:bg-spotify-light-gray 
-           p-4 rounded-lg transition-colors cursor-pointer;
+           p-3 sm:p-4 rounded-lg transition-colors cursor-pointer;
   }
   
   .input {
     @apply bg-spotify-light-gray border border-transparent focus:border-white
-           text-white px-4 py-3 rounded-md outline-none transition-colors
-           placeholder:text-spotify-text-gray w-full;
+           text-white px-4 py-2.5 sm:py-3 rounded-md outline-none transition-colors
+           placeholder:text-spotify-text-gray w-full text-sm sm:text-base;
   }
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 12px;
-}
+/* Custom scrollbar — desktop only */
+@media (min-width: 1024px) {
+  ::-webkit-scrollbar {
+    width: 12px;
+  }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
 
-::-webkit-scrollbar-thumb {
-  background: #3E3E3E;
-  border-radius: 6px;
-  border: 3px solid #121212;
-}
+  ::-webkit-scrollbar-thumb {
+    background: #3E3E3E;
+    border-radius: 6px;
+    border: 3px solid #121212;
+  }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #535353;
+  ::-webkit-scrollbar-thumb:hover {
+    background: #535353;
+  }
 }
 
 /* Range Slider Thumb (player progress / volume) */
@@ -88,6 +98,28 @@
   opacity: 1;
 }
 
+/* Mobile slider — always visible, larger */
+.slider-thumb-mobile::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+
+.slider-thumb-mobile::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+
 /* Loading shimmer */
 @keyframes shimmer {
   0% { background-position: -1000px 0; }
@@ -103,4 +135,26 @@
   );
   background-size: 1000px 100%;
   animation: shimmer 2s infinite linear;
+}
+
+/* Animation for fade-in */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Prevent text selection on player controls (mobile UX) */
+.player-controls {
+  user-select: none;
+  -webkit-user-select: none;
 }

@@ -24,24 +24,19 @@ export function formatCount(num: number): string {
 }
 
 /**
- * Generate stream URL using slug.
- * 
- * The URL works WITHOUT .m3u extension (clean) but
- * /stream/slug.m3u also works for older players.
+ * Generate stream URL using short code.
+ * Example: https://yoursite.com/stream/ax8k2m
  */
-export function getStreamUrl(slug: string, baseUrl?: string): string {
+export function getStreamUrl(shortCode: string, baseUrl?: string): string {
   const base = baseUrl || process.env.NEXT_PUBLIC_SITE_URL || '';
-  // Encode slug to handle Arabic and special characters in URLs
-  const encodedSlug = encodeURIComponent(slug);
-  return `${base}/stream/${encodedSlug}`;
+  return `${base}/stream/${shortCode}`;
 }
 
 /**
  * Generate stream URL with .m3u extension (for compatibility).
- * Use this when the player MUST see the .m3u extension.
  */
-export function getStreamUrlWithExtension(slug: string, baseUrl?: string): string {
-  return `${getStreamUrl(slug, baseUrl)}.m3u`;
+export function getStreamUrlWithExtension(shortCode: string, baseUrl?: string): string {
+  return `${getStreamUrl(shortCode, baseUrl)}.m3u`;
 }
 
 export async function hashString(input: string): Promise<string> {
