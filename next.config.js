@@ -1,14 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Allow production builds to succeed even with TS or lint warnings.
-  // Errors in dev are still shown — this only affects the production build.
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-
   images: {
     remotePatterns: [
       {
@@ -21,16 +12,21 @@ const nextConfig = {
   /**
    * URL Rewrites — pretty stream URLs
    * 
-   * Both URLs hit the same handler:
+   * Both these URLs hit the same handler:
    *   /stream/my-playlist        ← clean URL
    *   /stream/my-playlist.m3u    ← traditional playlist URL
+   * 
+   * Internal route: /api/stream/{slug}
+   * The handler strips .m3u from slug if present.
    */
   async rewrites() {
     return [
+      // Match with .m3u extension
       {
         source: '/stream/:slug.m3u',
         destination: '/api/stream/:slug',
       },
+      // Match without extension
       {
         source: '/stream/:slug',
         destination: '/api/stream/:slug',
