@@ -1,25 +1,18 @@
 /**
- * ============================================================
- * 🎵 STREAM ENDPOINT — Slug-based, Player-Friendly
- * ============================================================
- * 
- * URL: /stream/{slug}
- * 
- * Uses content negotiation + smart Content-Type detection
- * to ensure compatibility with ALL media players, regardless
- * of whether the URL ends in .m3u or not.
- * 
- * Strategy:
- * 1. Strip .m3u extension if present (so /stream/x and /stream/x.m3u both work)
- * 2. Always return M3U content
- * 3. Set Content-Type: audio/x-mpegurl (the standard MIME type)
- * 4. Set Content-Disposition with .m3u filename for browsers
- * 
- * This ensures:
- * - VLC: ✅ Works (recognizes Content-Type)
- * - IMVU: ✅ Works (downloads as .m3u via Content-Disposition)
- * - Browsers: ✅ Either streams or downloads the m3u file
- * - Any other player: ✅ Works (M3U is universal)
+ * Stream Endpoint — M3U playlist
+ *
+ * URL: /stream/{code} or /stream/{code}.m3u
+ *
+ * Produces a standard M3U playlist suitable for VLC, browsers, mobile media
+ * players, and any client that knows how to parse playlist files and follow
+ * redirects.
+ *
+ * IMPORTANT: IMVU does NOT use this endpoint. IMVU only accepts continuous
+ * Icecast-style MP3 streams — see /api/radio/[code] for the IMVU URL.
+ *
+ * As a courtesy fallback, the very first line of the playlist points back at
+ * the radio endpoint so that any client that reads only the first entry of
+ * an M3U (some old/limited players do this) still gets a valid stream.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -32,7 +25,7 @@ export const runtime = 'nodejs';
 interface PlaylistRow {
   playlist_id: string;
   playlist_name: string;
-  playlist_slug: string;
+  playlist_short_code: string;
   user_id: string;
   track_id: number;
   track_title: string;
@@ -43,14 +36,12 @@ interface PlaylistRow {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> }
+  { params }: { params: Promise<{ code: string }> }
 ) {
-  const { slug: rawSlug } = await params;
-  
-  // Accept both /stream/name and /stream/name.m3u
-  const slug = rawSlug.replace(/\.m3u$/i, '').toLowerCase();
+  const { code: rawCode } = await params;
+  const code = rawCode.replace(/\.m3u$/i, '').toLowerCase();
 
-  if (!slug || slug.length < 1) {
+  if (!code || code.length < 1) {
     return new NextResponse('Invalid playlist URL', { status: 400 });
   }
 
@@ -58,7 +49,7 @@ export async function GET(
     const supabase = createAdminSupabaseClient();
 
     const { data: rawRows, error } = await supabase
-      .rpc('get_playlist_by_slug', { p_slug: slug });
+      .rpc('get_playlist_by_short_code', { p_code: code });
 
     if (error) {
       console.error('Database error:', error);
@@ -69,7 +60,7 @@ export async function GET(
 
     if (rows.length === 0) {
       return new NextResponse(
-        `Playlist "${slug}" not found or has no tracks`, 
+        `Playlist not found: ${code}`,
         { status: 404 }
       );
     }
@@ -79,6 +70,13 @@ export async function GET(
 
     const baseUrl = getBaseUrl(request);
     const m3uLines: string[] = ['#EXTM3U'];
+
+    // Courtesy fallback: first entry is the continuous radio stream, so any
+    // primitive client that only reads the first track of an .m3u (like some
+    // very old hardware players, or clients that mistake .m3u for a Shoutcast
+    // proxy) still gets a working stream URL.
+    m3uLines.push(`#EXTINF:-1,${playlistName} (Radio)`);
+    m3uLines.push(`${baseUrl}/radio/${code}.mp3`);
 
     for (const row of rows) {
       const durationSeconds = Math.floor(row.track_duration_ms / 1000);
@@ -91,8 +89,7 @@ export async function GET(
 
     const m3uContent = m3uLines.join('\n') + '\n';
 
-    // Async logging (non-blocking)
-    logStreamAccess(slug, request).catch(err => 
+    logStreamAccess(code, request).catch(err =>
       console.error('Failed to log stream access:', err)
     );
 
@@ -100,14 +97,11 @@ export async function GET(
       console.error('Failed to increment play count:', err)
     );
 
-    // Smart Content-Disposition
-    // - "inline" lets browsers play it directly when possible
-    // - The .m3u filename ensures it's recognized as a playlist
     return new NextResponse(m3uContent, {
       status: 200,
       headers: {
         'Content-Type': 'audio/x-mpegurl; charset=utf-8',
-        'Content-Disposition': `inline; filename="${sanitizeFilename(slug)}.m3u"`,
+        'Content-Disposition': `inline; filename="${sanitizeFilename(playlistName)}.m3u"`,
         'Cache-Control': 'no-store, must-revalidate',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
@@ -132,7 +126,7 @@ export async function OPTIONS() {
 
 export async function HEAD(
   request: NextRequest,
-  context: { params: Promise<{ slug: string }> }
+  context: { params: Promise<{ code: string }> }
 ) {
   const response = await GET(request, context);
   return new NextResponse(null, {
@@ -147,7 +141,7 @@ function getBaseUrl(request: NextRequest): string {
   }
   const host = request.headers.get('host') || 'localhost:3000';
   const protocol = host.includes('localhost') || host.startsWith('127.')
-    ? 'http' 
+    ? 'http'
     : 'https';
   return `${protocol}://${host}`;
 }
@@ -156,11 +150,11 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9_\u0600-\u06FF\-]/g, '_').substring(0, 60);
 }
 
-async function logStreamAccess(slug: string, request: NextRequest) {
+async function logStreamAccess(code: string, request: NextRequest) {
   const supabase = createAdminSupabaseClient();
 
   const userAgent = request.headers.get('user-agent') || 'unknown';
-  const ip = 
+  const ip =
     request.headers.get('x-forwarded-for')?.split(',')[0] ||
     request.headers.get('x-real-ip') ||
     'unknown';
@@ -168,7 +162,7 @@ async function logStreamAccess(slug: string, request: NextRequest) {
   const ipHash = await hashString(ip);
 
   await supabase.from('stream_access_logs').insert({
-    stream_token: slug,
+    stream_token: code,
     user_agent: userAgent.substring(0, 500),
     ip_hash: ipHash,
   });

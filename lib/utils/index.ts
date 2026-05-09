@@ -24,24 +24,31 @@ export function formatCount(num: number): string {
 }
 
 /**
- * Generate stream URL using slug.
- * 
- * The URL works WITHOUT .m3u extension (clean) but
- * /stream/slug.m3u also works for older players.
+ * Generate stream URL using short code (M3U playlist — VLC, browsers, mobile).
+ * Example: https://yoursite.com/stream/ax8k2m
  */
-export function getStreamUrl(slug: string, baseUrl?: string): string {
+export function getStreamUrl(shortCode: string, baseUrl?: string): string {
   const base = baseUrl || process.env.NEXT_PUBLIC_SITE_URL || '';
-  // Encode slug to handle Arabic and special characters in URLs
-  const encodedSlug = encodeURIComponent(slug);
-  return `${base}/stream/${encodedSlug}`;
+  return `${base}/stream/${shortCode}`;
 }
 
 /**
  * Generate stream URL with .m3u extension (for compatibility).
- * Use this when the player MUST see the .m3u extension.
  */
-export function getStreamUrlWithExtension(slug: string, baseUrl?: string): string {
-  return `${getStreamUrl(slug, baseUrl)}.m3u`;
+export function getStreamUrlWithExtension(shortCode: string, baseUrl?: string): string {
+  return `${getStreamUrl(shortCode, baseUrl)}.m3u`;
+}
+
+/**
+ * Generate IMVU-compatible radio URL.
+ * Returns a URL that emits a continuous Icecast-style MP3 stream.
+ * Example: https://yoursite.com/radio/ax8k2m.mp3
+ *
+ * Use this URL in IMVU's room radio streaming feature.
+ */
+export function getRadioUrl(shortCode: string, baseUrl?: string): string {
+  const base = baseUrl || process.env.NEXT_PUBLIC_SITE_URL || '';
+  return `${base}/radio/${shortCode}.mp3`;
 }
 
 export async function hashString(input: string): Promise<string> {

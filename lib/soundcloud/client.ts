@@ -1,6 +1,6 @@
 /**
  * SoundCloud API Client — V2 (Internal API)
- * 
+ *
  * Uses api-v2.soundcloud.com — same as the SoundCloud website.
  * The old V1 API (api.soundcloud.com) is restricted for public use.
  */
@@ -20,11 +20,37 @@ const DEFAULT_HEADERS = {
 export interface StreamResult {
   url: string;
   type: 'progressive' | 'hls';
+  /** MIME reported by SoundCloud (e.g. "audio/mpeg", "audio/mp4"). */
+  mimeType?: string;
+  /** True when the chosen transcoding is MP3 (required by IMVU). */
+  isMp3?: boolean;
+}
+
+/**
+ * Descriptor used by the radio (IMVU) endpoint when it needs MP3 bytes.
+ */
+export interface Mp3StreamSource {
+  trackId: number;
+  /** Final resolved URL — either a direct progressive MP3 or an HLS-MP3 manifest. */
+  url: string;
+  type: 'progressive' | 'hls';
+  /** Always "audio/mpeg" for an Mp3StreamSource. */
+  mimeType: string;
+}
+
+/**
+ * Determine if a SoundCloud transcoding is MP3 (the only format IMVU accepts).
+ */
+function isMp3Transcoding(t: any): boolean {
+  const mime = String(t?.format?.mime_type || '').toLowerCase();
+  const preset = String(t?.preset || '').toLowerCase();
+  // mp3_0_0, mp3_1_0, mp3_standard, etc. Opus is "opus_0_0", AAC is "aac_..."
+  return mime.includes('mpeg') || preset.startsWith('mp3');
 }
 
 export class SoundCloudClient {
   private clientId: string;
-  
+
   constructor(clientId: string) {
     if (!clientId) {
       throw new Error('SoundCloud client ID is required');
@@ -36,11 +62,11 @@ export class SoundCloudClient {
    * Search for tracks
    */
   async searchTracks(
-    query: string, 
+    query: string,
     options: { limit?: number; offset?: number } = {}
   ): Promise<Track[]> {
     const { limit = 20, offset = 0 } = options;
-    
+
     const params = new URLSearchParams({
       q: query,
       client_id: this.clientId,
@@ -50,7 +76,7 @@ export class SoundCloudClient {
     });
 
     const url = `${SOUNDCLOUD_API_V2}/search/tracks?${params}`;
-    
+
     try {
       const response = await fetch(url, {
         headers: DEFAULT_HEADERS,
@@ -60,7 +86,7 @@ export class SoundCloudClient {
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         console.error(
-          `SoundCloud V2 API error: ${response.status}`, 
+          `SoundCloud V2 API error: ${response.status}`,
           text.substring(0, 300)
         );
         throw new Error(
@@ -71,7 +97,7 @@ export class SoundCloudClient {
 
       const data = await response.json();
       const tracks = (data.collection || []) as any[];
-      
+
       return tracks
         .filter(t => t.kind === 'track' && t.streamable !== false)
         .map(normalizeV2Track);
@@ -112,7 +138,7 @@ export class SoundCloudClient {
 
   /**
    * Resolve stream URL with type info.
-   * 
+   *
    * @param trackId - SoundCloud track ID
    * @param preferProgressive - If true, only use progressive (MP3). Better for M3U/external players.
    *                           If false, prefer HLS (better quality, used by web player).
@@ -141,35 +167,23 @@ export class SoundCloudClient {
         return null;
       }
 
-      // Filter out preview-only transcodings (snippets)
-      const fullTranscodings = transcodings.filter(
-        (t: any) => !t.snipped
-      );
+      const fullTranscodings = transcodings.filter((t: any) => !t.snipped);
       const candidates = fullTranscodings.length > 0 ? fullTranscodings : transcodings;
 
       let chosen: any = null;
       let chosenType: 'progressive' | 'hls' = 'progressive';
 
       if (preferProgressive) {
-        // For external M3U: prefer progressive (MP3)
-        chosen = candidates.find(
-          (t: any) => t.format?.protocol === 'progressive'
-        );
-        if (chosen) {
-          chosenType = 'progressive';
-        } else {
-          // Fall back to HLS if no progressive
+        chosen = candidates.find((t: any) => t.format?.protocol === 'progressive');
+        if (chosen) chosenType = 'progressive';
+        else {
           chosen = candidates.find((t: any) => t.format?.protocol === 'hls');
           if (chosen) chosenType = 'hls';
         }
       } else {
-        // For web player: prefer progressive too (simpler), fall back to HLS
-        chosen = candidates.find(
-          (t: any) => t.format?.protocol === 'progressive'
-        );
-        if (chosen) {
-          chosenType = 'progressive';
-        } else {
+        chosen = candidates.find((t: any) => t.format?.protocol === 'progressive');
+        if (chosen) chosenType = 'progressive';
+        else {
           chosen = candidates.find((t: any) => t.format?.protocol === 'hls');
           if (chosen) chosenType = 'hls';
         }
@@ -178,14 +192,9 @@ export class SoundCloudClient {
       if (!chosen) chosen = candidates[0];
       if (!chosen) return null;
 
-      // Determine type from chosen
-      if (chosen.format?.protocol === 'hls') {
-        chosenType = 'hls';
-      } else {
-        chosenType = 'progressive';
-      }
+      if (chosen.format?.protocol === 'hls') chosenType = 'hls';
+      else chosenType = 'progressive';
 
-      // Resolve transcoding URL
       const transcodingUrl = `${chosen.url}?client_id=${this.clientId}`;
       const resolveResponse = await fetch(transcodingUrl, {
         headers: DEFAULT_HEADERS,
@@ -200,9 +209,92 @@ export class SoundCloudClient {
       const data = await resolveResponse.json();
       if (!data.url) return null;
 
-      return { url: data.url, type: chosenType };
+      const mime = String(chosen.format?.mime_type || '');
+      return {
+        url: data.url,
+        type: chosenType,
+        mimeType: mime,
+        isMp3: isMp3Transcoding(chosen),
+      };
     } catch (error) {
       console.error(`Failed to get stream URL for track ${trackId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Resolve a track to its MP3 stream specifically — required for IMVU radio.
+   * IMVU only accepts MPEG audio (MP3); Opus/AAC will not play.
+   *
+   * Returns null if the track has no MP3 transcoding available.
+   */
+  async resolveMp3Stream(trackId: number): Promise<Mp3StreamSource | null> {
+    try {
+      const params = new URLSearchParams({ client_id: this.clientId });
+      const trackResponse = await fetch(
+        `${SOUNDCLOUD_API_V2}/tracks/${trackId}?${params}`,
+        { headers: DEFAULT_HEADERS, cache: 'no-store' }
+      );
+
+      if (!trackResponse.ok) {
+        console.error(`[mp3] Track fetch failed for ${trackId}: ${trackResponse.status}`);
+        return null;
+      }
+
+      const track = await trackResponse.json();
+      const transcodings: any[] = track.media?.transcodings || [];
+
+      if (transcodings.length === 0) {
+        console.error(`[mp3] No transcodings for track ${trackId}`);
+        return null;
+      }
+
+      const full = transcodings.filter((t) => !t.snipped);
+      const pool = full.length > 0 ? full : transcodings;
+
+      // MP3 only — IMVU requirement.
+      const mp3 = pool.filter(isMp3Transcoding);
+      if (mp3.length === 0) {
+        console.error(
+          `[mp3] Track ${trackId} has no MP3 transcoding ` +
+          `(available: ${pool.map((t) => t.preset).join(', ')})`
+        );
+        return null;
+      }
+
+      // Prefer progressive MP3 (single file), fall back to HLS-MP3 (segmented).
+      const chosen =
+        mp3.find((t) => t.format?.protocol === 'progressive') ||
+        mp3.find((t) => t.format?.protocol === 'hls') ||
+        mp3[0];
+
+      const protocol: 'progressive' | 'hls' =
+        chosen.format?.protocol === 'hls' ? 'hls' : 'progressive';
+
+      const transcodingUrl = `${chosen.url}?client_id=${this.clientId}`;
+      const resolveResponse = await fetch(transcodingUrl, {
+        headers: DEFAULT_HEADERS,
+        cache: 'no-store',
+      });
+
+      if (!resolveResponse.ok) {
+        console.error(
+          `[mp3] Transcoding resolve failed for track ${trackId}: ${resolveResponse.status}`
+        );
+        return null;
+      }
+
+      const data = await resolveResponse.json();
+      if (!data.url) return null;
+
+      return {
+        trackId,
+        url: data.url,
+        type: protocol,
+        mimeType: 'audio/mpeg',
+      };
+    } catch (error) {
+      console.error(`[mp3] Failed to resolve track ${trackId}:`, error);
       return null;
     }
   }
@@ -245,7 +337,7 @@ export class SoundCloudClient {
 
 function normalizeV2Track(scTrack: any): Track {
   let artworkUrl: string | null = null;
-  
+
   if (scTrack.artwork_url) {
     artworkUrl = scTrack.artwork_url.replace('-large', '-t500x500');
   } else if (scTrack.user?.avatar_url) {

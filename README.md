@@ -1,86 +1,43 @@
-# 🎵 Spotify Clone with SoundCloud — Stream Anywhere
+# 🎵 Spotify Clone — Stream Anywhere (IMVU-Compatible)
 
-A Spotify-like music streaming app where each user gets a personal `.m3u` URL that plays their playlist in any media player (browsers, VLC, IMVU, car stereos).
+A Spotify-like music streaming app where each user gets:
+
+- A **playlist URL** (`.m3u`) that plays in VLC, browsers, mobile media players, car stereos.
+- An **IMVU radio URL** (`.mp3`) that plays directly in IMVU's room radio streaming feature.
 
 ## ✨ Features
 
-- 🔐 User authentication (signup/login with username + password)
-- 🎵 Search SoundCloud's massive music library
+- 🔐 User authentication (signup/login)
+- 🎵 Search SoundCloud's library
 - 📝 Create and manage playlists
-- 🔗 **Per-user streaming URL** — each user gets `https://yoursite.com/stream/{token}.m3u`
-- 🎧 Stream URLs work in: VLC, browsers, IMVU, web radios, car stereos, etc.
-- 🎨 Spotify-inspired clean UI
-- 🌐 Bilingual support (English/Arabic)
+- 🔗 **Per-playlist M3U URL** — `https://yoursite.com/stream/{code}.m3u`
+- 📻 **Per-playlist IMVU radio URL** — `https://yoursite.com/radio/{code}.mp3`
+- 🎨 Spotify-inspired UI
+- 🌐 Bilingual support (English / Arabic)
 
 ## 🏗️ Architecture
 
 ```
-Frontend (Next.js 14) → Vercel
-Backend (API Routes)  → Vercel Serverless Functions
-Database + Auth       → Supabase (free tier)
-Music Source          → SoundCloud API
+Frontend (Next.js 14)         → Vercel
+Backend (API Routes)          → Vercel Serverless Functions (Node runtime)
+Database + Auth               → Supabase
+Music Source                  → SoundCloud V2 API
+Radio Stream Endpoint         → Long-lived Node response (audio/mpeg)
 ```
 
-## 📂 Project Structure
-
-```
-spotify-clone/
-├── app/                          # Next.js 14 App Router
-│   ├── (auth)/
-│   │   ├── login/page.tsx
-│   │   └── signup/page.tsx
-│   ├── (main)/
-│   │   ├── layout.tsx           # Sidebar + player layout
-│   │   ├── page.tsx             # Home/Browse
-│   │   ├── search/page.tsx
-│   │   ├── library/page.tsx
-│   │   └── playlist/[id]/page.tsx
-│   ├── api/
-│   │   ├── auth/
-│   │   ├── search/route.ts
-│   │   ├── playlists/
-│   │   └── stream/
-│   │       └── [token]/route.ts # m3u generator
-│   ├── layout.tsx
-│   └── globals.css
-├── components/
-│   ├── player/
-│   │   ├── AudioPlayer.tsx
-│   │   ├── PlayerControls.tsx
-│   │   └── ProgressBar.tsx
-│   ├── playlist/
-│   │   ├── PlaylistCard.tsx
-│   │   ├── TrackList.tsx
-│   │   └── ShareModal.tsx
-│   ├── ui/
-│   └── layout/
-│       ├── Sidebar.tsx
-│       └── TopBar.tsx
-├── lib/
-│   ├── supabase/
-│   │   ├── client.ts
-│   │   ├── server.ts
-│   │   └── middleware.ts
-│   ├── soundcloud/
-│   │   ├── client.ts
-│   │   └── types.ts
-│   └── utils/
-├── database/
-│   └── schema.sql
-├── public/
-├── .env.local.example
-├── next.config.js
-├── tailwind.config.ts
-├── tsconfig.json
-└── package.json
-```
+> ⚠️ **Hosting note for the radio endpoint**: Vercel's Hobby plan caps function
+> duration at ~10s, and Pro at 60s/300s depending on tier. Because the
+> `/radio/:code` endpoint streams continuously, in production you should host
+> the app on a platform that supports long-lived HTTP responses — Fly.io,
+> Railway, Render, a VPS, or Vercel Pro/Enterprise with Edge Runtime adapted.
+> The `.m3u` endpoint works on any tier because it returns instantly.
 
 ## 🚀 Setup
 
-1. **Create accounts (all free):**
-   - [Vercel](https://vercel.com)
-   - [Supabase](https://supabase.com) — create new project
-   - [SoundCloud Developers](https://developers.soundcloud.com) — register app
+1. **Create accounts (all free tiers):**
+   - [Vercel](https://vercel.com) (or Fly / Railway / Render for long radio streams)
+   - [Supabase](https://supabase.com)
+   - SoundCloud client ID (extract from soundcloud.com web inspector)
 
 2. **Clone and install:**
    ```bash
@@ -89,7 +46,7 @@ spotify-clone/
    npm install
    ```
 
-3. **Setup environment variables (`.env.local`):**
+3. **Setup `.env.local`:**
    ```env
    NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
@@ -98,46 +55,86 @@ spotify-clone/
    NEXT_PUBLIC_SITE_URL=http://localhost:3000
    ```
 
-4. **Run database migrations:**
-   - Copy `database/schema.sql` content
-   - Paste into Supabase SQL Editor
-   - Run
+4. **Run the SQL files in `database/`** in your Supabase SQL editor (in order).
 
-5. **Start dev server:**
+5. **Run dev server:**
    ```bash
    npm run dev
    ```
 
-6. **Deploy to Vercel:**
-   ```bash
-   vercel deploy
-   ```
+## 🔗 The Two Stream URLs
 
-## 🔗 How the Streaming URL Works
+When a user creates a playlist, the share card shows two URLs:
 
-When a user creates a playlist, they get a unique URL:
+### 📻 IMVU Radio URL — for IMVU rooms
+
 ```
-https://yoursite.com/stream/a1b2c3d4e5f6g7h8.m3u
+https://yoursite.com/radio/ax8k2m.mp3
 ```
 
-When any media player opens this URL:
-1. Backend looks up the playlist by token
-2. Fetches fresh stream URLs from SoundCloud for each track
-3. Returns a standard M3U playlist file
-4. Player streams the tracks directly from SoundCloud
+- **Always use this URL inside IMVU.**
+- The endpoint emits a continuous Icecast-style MP3 byte stream.
+- Tracks loop forever; the stream never ends.
+- Each track gets a fresh SoundCloud signed URL when its turn comes up,
+  so the stream never breaks from expired CDN tokens.
+- Headers include `Content-Type: audio/mpeg`, `icy-name`, `icy-br`, etc. —
+  exactly what IMVU's radio player expects.
 
-This means:
-- ✅ Works in VLC, browsers, IMVU, car stereos, etc.
-- ✅ No webpage opens — pure audio streaming
-- ✅ Always fresh URLs (no expired links)
-- ✅ Minimal bandwidth on your server (just metadata)
+### 🎵 Playlist (M3U) URL — for VLC / browsers / mobile
 
-## 💰 Cost Breakdown
+```
+https://yoursite.com/stream/ax8k2m
+https://yoursite.com/stream/ax8k2m.m3u
+```
 
-| Service | Free Tier | Cost After |
-|---------|-----------|------------|
-| Vercel | 100GB bandwidth | $20/month |
-| Supabase | 500MB DB + 2GB bandwidth | $25/month |
-| SoundCloud API | 15,000 req/day | Contact them |
+- Returns a standard `#EXTM3U` playlist.
+- Each entry redirects to a fresh SoundCloud stream URL on play.
+- The first entry of the .m3u also points back at the IMVU radio stream
+  as a courtesy fallback for primitive clients.
 
-**Total cost for ~1000 active users: $0** 🎉
+## ❓ Why two URLs?
+
+Because IMVU's room radio player is **not** a generic media player.
+
+According to IMVU's official documentation:
+
+> *"only MPEG audio formats (MP3) are currently supported. Other formats, such as AAC, are not supported and will not play as expected."*
+>
+> — [IMVU Support — Radio Streaming](https://support.imvu.com/support/solutions/articles/154000216641-radio-streaming)
+
+> *"The only URLs that work in the IMVU 'Live' room streaming radio player are what is known as 'Direct Stream' URLs."*
+>
+> — IMVU Community Center
+
+That means:
+
+| Player          | Wants                        | Endpoint to use                  |
+|-----------------|------------------------------|----------------------------------|
+| **IMVU**        | Continuous MP3 (Icecast)     | `/radio/{code}.mp3`              |
+| VLC             | M3U playlist                 | `/stream/{code}.m3u`             |
+| Browsers        | Either                       | Either (radio is simpler)        |
+| Car stereos     | M3U / direct MP3             | Either                           |
+| Web app player  | Per-track JSON               | `/api/stream-resolve/{id}?format=json` |
+
+The `/radio` endpoint:
+1. Loads the playlist's tracks from the DB.
+2. For each track in order: resolves a fresh SoundCloud **MP3-only** transcoding (rejecting Opus/AAC, which IMVU can't decode).
+3. Pipes the MP3 bytes (progressive file or HLS-MP3 segments concatenated) straight to the client.
+4. When the playlist ends, loops back to the start.
+5. Stops only when the IMVU client disconnects.
+
+## 🧰 Debugging IMVU playback
+
+If the radio URL doesn't play in an IMVU room:
+
+1. **Open the URL in Chrome / Edge** — music should start playing instantly.
+   If the browser shows a download prompt or text, the stream isn't healthy.
+2. **Check server logs** for `[radio]` lines — they show track resolution and any failures (e.g., a track has no MP3 transcoding available).
+3. **Make sure the playlist has tracks** that have MP3 transcodings on SoundCloud. Almost all do, but a small number are HLS-Opus only — the radio endpoint will skip those automatically.
+4. **Use HTTPS** — IMVU requires HTTPS. Plain HTTP URLs won't load.
+5. **Verify hosting supports long responses** — see the hosting note above.
+6. **In IMVU**, paste the URL into the room radio dialog. If it shows "Off Air", click Play.
+
+## 💰 Cost
+
+Same as before. Note: a long-running radio host (e.g. Fly.io free tier, Railway hobby plan) is roughly free at low traffic; on a VPS, expect a few dollars/month per concurrent listener due to bandwidth.
