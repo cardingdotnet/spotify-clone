@@ -26,6 +26,16 @@ export function formatCount(num: number): string {
 /**
  * Generate stream URL using short code.
  * Example: https://yoursite.com/stream/ax8k2m
+ *
+ * This URL works in:
+ *  - IMVU room Radio Streaming (paste as-is)
+ *  - VLC (open network stream)
+ *  - Browsers (downloads/plays M3U)
+ *  - Mobile players
+ *
+ * How it works: returns an M3U playlist where each entry is
+ * /api/stream-resolve/[trackId] which does a 302 redirect to
+ * the actual SoundCloud MP3. IMVU follows the full redirect chain.
  */
 export function getStreamUrl(shortCode: string, baseUrl?: string): string {
   const base = baseUrl || process.env.NEXT_PUBLIC_SITE_URL || '';
@@ -33,22 +43,12 @@ export function getStreamUrl(shortCode: string, baseUrl?: string): string {
 }
 
 /**
- * Generate stream URL with .m3u extension (for compatibility).
+ * Generate stream URL with .m3u extension.
+ * Some older/stricter players require the .m3u extension to recognise the format.
+ * Both /stream/code and /stream/code.m3u hit the same endpoint.
  */
 export function getStreamUrlWithExtension(shortCode: string, baseUrl?: string): string {
   return `${getStreamUrl(shortCode, baseUrl)}.m3u`;
-}
-
-/**
- * Generate IMVU-compatible radio stream URL.
- * This is a continuous audio/mpeg stream — paste directly into IMVU room radio.
- * Example: https://yoursite.com/radio/ax8k2m.mp3
- *
- * The .mp3 extension helps IMVU's media crawler recognise the format.
- */
-export function getRadioUrl(shortCode: string, baseUrl?: string): string {
-  const base = baseUrl || process.env.NEXT_PUBLIC_SITE_URL || '';
-  return `${base}/radio/${shortCode}.mp3`;
 }
 
 export async function hashString(input: string): Promise<string> {
