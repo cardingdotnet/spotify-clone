@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { Music, Plus, Headphones, Share2 } from 'lucide-react';
+import { Music, Plus, Headphones, Share2, Sparkles, TrendingUp } from 'lucide-react';
 
 export default async function HomePage() {
   const supabase = await createClient();
@@ -17,100 +17,173 @@ export default async function HomePage() {
     .select('id, name, cover_url, play_count, short_code')
     .eq('user_id', user!.id)
     .order('updated_at', { ascending: false })
-    .limit(6);
+    .limit(8);
 
   const greeting = getGreeting();
   const name = profile?.display_name || profile?.username || 'there';
+  const totalPlays = playlists?.reduce((acc, p) => acc + (p.play_count || 0), 0) || 0;
 
   return (
-    <div className="p-4 sm:p-8">
-      <h1 className="text-2xl sm:text-4xl font-bold mb-6 sm:mb-8">
-        {greeting}, {name} 👋
-      </h1>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-8 sm:mb-12">
-        <Link
-          href="/search"
-          className="bg-gradient-to-br from-purple-600 to-blue-600 p-4 sm:p-6 rounded-lg hover:scale-[1.02] transition-transform"
-        >
-          <Music className="w-6 h-6 sm:w-8 sm:h-8 mb-2 sm:mb-3" />
-          <h3 className="font-bold text-base sm:text-lg">Discover Music</h3>
-          <p className="text-xs sm:text-sm opacity-90 mt-1">
-            Search SoundCloud&apos;s massive library
+    <div className="relative">
+      {/* Hero gradient background */}
+      <div className="absolute inset-0 -z-10 h-[500px] bg-gradient-to-b from-purple-900/30 via-purple-900/10 to-transparent" />
+      
+      <div className="relative p-4 sm:p-6 lg:p-8">
+        {/* Hero Section */}
+        <section className="mb-8 sm:mb-12 animate-fade-in-up">
+          <div className="flex items-center gap-2 text-white/60 text-sm mb-2">
+            <Sparkles className="w-4 h-4" />
+            <span className="uppercase tracking-wider font-semibold text-xs">{greeting}</span>
+          </div>
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold mb-3 tracking-tight">
+            Welcome back, <span className="gradient-text-green">{name}</span>
+          </h1>
+          <p className="text-white/60 text-sm sm:text-base max-w-2xl">
+            {playlists && playlists.length > 0 
+              ? `You have ${playlists.length} playlist${playlists.length === 1 ? '' : 's'} with ${totalPlays} total plays`
+              : 'Start building your music collection — search, save, and stream anywhere.'
+            }
           </p>
-        </Link>
+        </section>
 
-        <Link
-          href="/library"
-          className="bg-gradient-to-br from-spotify-green to-emerald-700 p-4 sm:p-6 rounded-lg hover:scale-[1.02] transition-transform text-black"
-        >
-          <Headphones className="w-6 h-6 sm:w-8 sm:h-8 mb-2 sm:mb-3" />
-          <h3 className="font-bold text-base sm:text-lg">Your Playlists</h3>
-          <p className="text-xs sm:text-sm opacity-90 mt-1">
-            {playlists?.length || 0} playlists ready to stream
-          </p>
-        </Link>
-
-        <div className="bg-gradient-to-br from-orange-500 to-pink-600 p-4 sm:p-6 rounded-lg">
-          <Share2 className="w-6 h-6 sm:w-8 sm:h-8 mb-2 sm:mb-3" />
-          <h3 className="font-bold text-base sm:text-lg">Stream Anywhere</h3>
-          <p className="text-xs sm:text-sm opacity-90 mt-1">
-            Each playlist gets a short URL
-          </p>
-        </div>
-      </div>
-
-      {playlists && playlists.length > 0 ? (
-        <section>
-          <h2 className="text-xl sm:text-2xl font-bold mb-4">Your Playlists</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
-            {playlists.map((playlist) => (
-              <Link
-                key={playlist.id}
-                href={`/playlist/${playlist.id}`}
-                className="card group"
-              >
-                <div className="aspect-square bg-gradient-to-br from-spotify-light-gray to-spotify-lighter-gray rounded-md mb-2 sm:mb-3 flex items-center justify-center overflow-hidden">
-                  {playlist.cover_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={playlist.cover_url}
-                      alt={playlist.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <Music className="w-8 h-8 sm:w-12 sm:h-12 text-spotify-text-gray" />
-                  )}
-                </div>
-                <h3 className="font-semibold truncate text-sm sm:text-base">{playlist.name}</h3>
-                <p className="text-xs sm:text-sm text-spotify-text-gray mt-1">
-                  {playlist.play_count} plays
+        {/* Quick Action Cards */}
+        <section className="mb-10 sm:mb-12">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+            <Link
+              href="/search"
+              className="group relative overflow-hidden rounded-2xl p-5 sm:p-6 hover-lift animate-fade-in-up"
+              style={{ animationDelay: '100ms' }}
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-purple-600 via-blue-600 to-cyan-500" />
+              <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700" />
+              
+              <div className="relative">
+                <Music className="w-7 h-7 sm:w-9 sm:h-9 mb-3 drop-shadow-lg" />
+                <h3 className="font-bold text-lg sm:text-xl mb-1">Discover Music</h3>
+                <p className="text-xs sm:text-sm opacity-90">
+                  Explore millions of tracks on SoundCloud
                 </p>
+              </div>
+            </Link>
+
+            <Link
+              href="/library"
+              className="group relative overflow-hidden rounded-2xl p-5 sm:p-6 hover-lift text-black animate-fade-in-up"
+              style={{ animationDelay: '200ms' }}
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-spotify-green via-emerald-500 to-teal-400" />
+              <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/20 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700" />
+              
+              <div className="relative">
+                <Headphones className="w-7 h-7 sm:w-9 sm:h-9 mb-3 drop-shadow-lg" />
+                <h3 className="font-bold text-lg sm:text-xl mb-1">Your Library</h3>
+                <p className="text-xs sm:text-sm opacity-80">
+                  {playlists?.length || 0} playlists ready to stream
+                </p>
+              </div>
+            </Link>
+
+            <div 
+              className="group relative overflow-hidden rounded-2xl p-5 sm:p-6 hover-lift animate-fade-in-up"
+              style={{ animationDelay: '300ms' }}
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-orange-500 via-pink-500 to-rose-500" />
+              <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700" />
+              
+              <div className="relative">
+                <Share2 className="w-7 h-7 sm:w-9 sm:h-9 mb-3 drop-shadow-lg" />
+                <h3 className="font-bold text-lg sm:text-xl mb-1">Stream Anywhere</h3>
+                <p className="text-xs sm:text-sm opacity-90">
+                  Each playlist gets a short, shareable URL
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Recent Playlists */}
+        {playlists && playlists.length > 0 ? (
+          <section className="animate-fade-in-up" style={{ animationDelay: '400ms' }}>
+            <div className="flex items-center justify-between mb-4 sm:mb-5">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-spotify-green" />
+                <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Your Playlists</h2>
+              </div>
+              <Link 
+                href="/library" 
+                className="text-xs sm:text-sm text-white/60 hover:text-white hover:underline transition-colors uppercase tracking-wide font-semibold"
+              >
+                Show all
               </Link>
-            ))}
-          </div>
-        </section>
-      ) : (
-        <section className="text-center py-12 sm:py-16">
-          <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto bg-spotify-dark-gray rounded-full flex items-center justify-center mb-4">
-            <Plus className="w-8 h-8 sm:w-10 sm:h-10 text-spotify-text-gray" />
-          </div>
-          <h2 className="text-xl sm:text-2xl font-bold mb-2">Create your first playlist</h2>
-          <p className="text-spotify-text-gray mb-6 text-sm sm:text-base">
-            Search music and build playlists you can stream anywhere
-          </p>
-          <Link href="/search" className="btn-primary inline-block">
-            Start Exploring
-          </Link>
-        </section>
-      )}
+            </div>
+            
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
+              {playlists.map((playlist, idx) => (
+                <Link
+                  key={playlist.id}
+                  href={`/playlist/${playlist.id}`}
+                  className="card group relative animate-fade-in-up"
+                  style={{ animationDelay: `${500 + idx * 50}ms` }}
+                >
+                  <div className="aspect-square bg-gradient-to-br from-spotify-light-gray to-spotify-lighter-gray rounded-md mb-2 sm:mb-3 overflow-hidden relative shadow-lg">
+                    {playlist.cover_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={playlist.cover_url}
+                        alt={playlist.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div 
+                        className="w-full h-full flex items-center justify-center"
+                        style={{
+                          background: `linear-gradient(135deg, 
+                            hsl(${playlist.id.charCodeAt(0) * 7 % 360}, 60%, 40%), 
+                            hsl(${(playlist.id.charCodeAt(0) * 7 + 60) % 360}, 60%, 30%))`
+                        }}
+                      >
+                        <Music className="w-8 h-8 sm:w-12 sm:h-12 text-white/60" />
+                      </div>
+                    )}
+                  </div>
+                  <h3 className="font-semibold truncate text-sm sm:text-base">{playlist.name}</h3>
+                  <p className="text-xs sm:text-sm text-white/60 mt-0.5 truncate">
+                    {playlist.play_count} {playlist.play_count === 1 ? 'play' : 'plays'}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <section 
+            className="text-center py-12 sm:py-20 max-w-md mx-auto animate-fade-in-up"
+            style={{ animationDelay: '400ms' }}
+          >
+            <div className="relative w-24 h-24 mx-auto mb-6">
+              <div className="absolute inset-0 bg-spotify-green/20 rounded-full blur-2xl animate-pulse-glow" />
+              <div className="relative w-full h-full bg-gradient-to-br from-spotify-green to-emerald-600 rounded-full flex items-center justify-center shadow-2xl">
+                <Plus className="w-10 h-10 text-black" strokeWidth={3} />
+              </div>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-bold mb-2">Start your collection</h2>
+            <p className="text-white/60 mb-6 text-sm sm:text-base">
+              Create playlists, add your favorite tracks, and share them with anyone via a short URL.
+            </p>
+            <Link href="/search" className="btn-primary inline-block">
+              Start Exploring
+            </Link>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
 
 function getGreeting(): string {
   const hour = new Date().getHours();
+  if (hour < 5) return 'Late night vibes';
   if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (hour < 17) return 'Good afternoon';
+  if (hour < 21) return 'Good evening';
+  return 'Night sessions';
 }
