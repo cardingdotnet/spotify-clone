@@ -39,6 +39,18 @@ export function getStreamUrlWithExtension(shortCode: string, baseUrl?: string): 
   return `${getStreamUrl(shortCode, baseUrl)}.m3u`;
 }
 
+/**
+ * Generate IMVU-compatible radio stream URL.
+ * This is a continuous audio/mpeg stream — paste directly into IMVU room radio.
+ * Example: https://yoursite.com/radio/ax8k2m.mp3
+ *
+ * The .mp3 extension helps IMVU's media crawler recognise the format.
+ */
+export function getRadioUrl(shortCode: string, baseUrl?: string): string {
+  const base = baseUrl || process.env.NEXT_PUBLIC_SITE_URL || '';
+  return `${base}/radio/${shortCode}.mp3`;
+}
+
 export async function hashString(input: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(input);

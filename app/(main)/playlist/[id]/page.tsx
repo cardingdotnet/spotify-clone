@@ -5,10 +5,10 @@ import { useParams, useRouter } from 'next/navigation';
 import { 
   Music, Trash2, Copy, Check, Share2, Loader2,
   ExternalLink, Play, Pause, Edit2, MoreHorizontal, Clock,
-  Volume2
+  Volume2, Radio
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { formatDuration, getStreamUrl, getStreamUrlWithExtension } from '@/lib/utils';
+import { formatDuration, getStreamUrl, getStreamUrlWithExtension, getRadioUrl } from '@/lib/utils';
 import { usePlayerStore, PlayerTrack } from '@/lib/player/store';
 import { TrackListSkeleton } from '@/components/ui/Skeletons';
 import AudioWaves from '@/components/ui/AudioWaves';
@@ -44,6 +44,7 @@ export default function PlaylistPage() {
   const [loading, setLoading] = useState(true);
   const [copiedClean, setCopiedClean] = useState(false);
   const [copiedM3u, setCopiedM3u] = useState(false);
+  const [copiedRadio, setCopiedRadio] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [showShareCard, setShowShareCard] = useState(false);
@@ -220,6 +221,7 @@ export default function PlaylistPage() {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const cleanUrl = getStreamUrl(playlist.short_code, origin);
   const m3uUrl = getStreamUrlWithExtension(playlist.short_code, origin);
+  const radioUrl = getRadioUrl(playlist.short_code, origin);
 
   // Generate dynamic gradient based on playlist ID
   const hue = playlist.id.charCodeAt(0) * 7 % 360;
@@ -380,24 +382,57 @@ export default function PlaylistPage() {
         </button>
       </div>
 
-      {/* === SHARE CARD (Collapsible) === */}
       {showShareCard && (
         <div className="px-4 sm:px-8 mb-6 animate-fade-in-up">
           <div className="card-glass p-4 sm:p-6">
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3 mb-5">
               <div className="w-10 h-10 rounded-full bg-spotify-green/20 flex items-center justify-center">
                 <Share2 className="w-5 h-5 text-spotify-green" />
               </div>
               <div>
                 <h2 className="text-base sm:text-lg font-bold">Stream Anywhere</h2>
-                <p className="text-xs text-white/60">Works in VLC, browsers, IMVU, car stereos</p>
+                <p className="text-xs text-white/60">Works in VLC, browsers, IMVU rooms, car stereos</p>
               </div>
             </div>
 
-            {/* Short URL */}
+            {/* ── IMVU Radio URL (highlighted) ──────────────────────────── */}
+            <div className="mb-4 p-3 sm:p-4 rounded-xl border border-purple-500/40 bg-purple-500/10">
+              <div className="flex items-center gap-2 mb-2">
+                <Radio className="w-4 h-4 text-purple-400 flex-shrink-0" />
+                <label className="text-xs text-purple-300 uppercase font-bold tracking-wider">
+                  IMVU Room Radio URL
+                </label>
+                <span className="ml-auto px-2 py-0.5 bg-purple-500/20 text-purple-300 text-[10px] font-bold rounded-full uppercase tracking-wide">
+                  Recommended
+                </span>
+              </div>
+              <p className="text-[11px] text-white/50 mb-2 leading-relaxed">
+                Paste this directly into IMVU → Room → Radio Streaming. It streams MP3 audio continuously — no redirects, works like a real radio station.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={radioUrl}
+                  className="input flex-1 font-mono text-xs sm:text-sm border-purple-500/30 bg-purple-500/10"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <button
+                  onClick={() => copyToClipboard(radioUrl, setCopiedRadio)}
+                  className="flex items-center justify-center gap-2 whitespace-nowrap text-sm py-2.5 px-4 rounded-lg font-semibold transition-all bg-purple-600 hover:bg-purple-500 text-white"
+                  disabled={tracks.length === 0}
+                >
+                  {copiedRadio
+                    ? <><Check className="w-4 h-4" /> Copied</>
+                    : <><Copy className="w-4 h-4" /> Copy</>}
+                </button>
+              </div>
+            </div>
+
+            {/* ── Short URL (web player / VLC) ──────────────────────────── */}
             <div className="mb-3">
               <label className="text-[10px] text-white/50 uppercase font-bold tracking-wider">
-                Short URL (recommended)
+                Short URL — Web / VLC
               </label>
               <div className="flex gap-2 mt-1.5">
                 <input
@@ -417,10 +452,10 @@ export default function PlaylistPage() {
               </div>
             </div>
 
-            {/* M3U URL */}
+            {/* ── M3U URL ───────────────────────────────────────────────── */}
             <div className="mb-4">
               <label className="text-[10px] text-white/50 uppercase font-bold tracking-wider">
-                .m3u URL
+                .m3u Playlist — VLC / Media Players
               </label>
               <div className="flex gap-2 mt-1.5">
                 <input
@@ -440,7 +475,17 @@ export default function PlaylistPage() {
               </div>
             </div>
 
+            {/* Compatibility badges */}
             <div className="flex flex-wrap gap-1.5">
+              <a
+                href={radioUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 rounded-full text-xs transition-colors text-purple-300"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Test Radio
+              </a>
               <a
                 href={cleanUrl}
                 target="_blank"
@@ -448,10 +493,15 @@ export default function PlaylistPage() {
                 className="inline-flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] rounded-full text-xs transition-colors"
               >
                 <ExternalLink className="w-3 h-3" />
-                Test
+                Test M3U
               </a>
-              {['VLC', 'IMVU', 'Browsers', 'Mobile'].map(label => (
-                <span key={label} className="px-2.5 py-1 bg-white/[0.06] rounded-full text-xs">
+              {[
+                { label: 'IMVU Rooms', url: radioUrl },
+                { label: 'VLC', url: m3uUrl },
+                { label: 'Browsers', url: cleanUrl },
+                { label: 'Mobile', url: cleanUrl },
+              ].map(({ label }) => (
+                <span key={label} className="px-2.5 py-1 bg-white/[0.06] rounded-full text-xs text-white/70">
                   ✓ {label}
                 </span>
               ))}
