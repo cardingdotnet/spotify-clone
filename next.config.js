@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Allow production builds to succeed even with TS or lint warnings.
+  // Errors in dev are still shown — this only affects the production build.
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -18,15 +20,10 @@ const nextConfig = {
 
   /**
    * URL Rewrites — pretty stream URLs
-   *
-   * Both hit the same handler:
-   *   /stream/ax8k2m        ← clean URL (works in IMVU, VLC, browsers)
-   *   /stream/ax8k2m.m3u    ← traditional M3U URL (some players require extension)
-   *
-   * The endpoint returns an M3U playlist where each track entry is:
-   *   /api/stream-resolve/[trackId]
-   * which does a 302 redirect to the actual SoundCloud MP3 URL.
-   * IMVU follows the redirect chain and plays the MP3 directly.
+   * 
+   * Both URLs hit the same handler:
+   *   /stream/my-playlist        ← clean URL
+   *   /stream/my-playlist.m3u    ← traditional playlist URL
    */
   async rewrites() {
     return [
@@ -48,7 +45,6 @@ const nextConfig = {
         headers: [
           { key: 'Cache-Control', value: 'no-store, must-revalidate' },
           { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET, HEAD, OPTIONS' },
         ],
       },
       {
@@ -56,7 +52,6 @@ const nextConfig = {
         headers: [
           { key: 'Cache-Control', value: 'no-store, must-revalidate' },
           { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET, HEAD, OPTIONS' },
         ],
       },
     ];
