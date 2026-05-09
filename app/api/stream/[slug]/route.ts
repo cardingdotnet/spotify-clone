@@ -57,16 +57,17 @@ export async function GET(
   try {
     const supabase = createAdminSupabaseClient();
 
-    const { data: rows, error } = await supabase
-      .rpc('get_playlist_by_slug', { p_slug: slug })
-      .returns<PlaylistRow[]>();
+    const { data: rawRows, error } = await supabase
+      .rpc('get_playlist_by_slug', { p_slug: slug });
 
     if (error) {
       console.error('Database error:', error);
       return new NextResponse('Failed to load playlist', { status: 500 });
     }
 
-    if (!rows || rows.length === 0) {
+    const rows = (rawRows ?? []) as PlaylistRow[];
+
+    if (rows.length === 0) {
       return new NextResponse(
         `Playlist "${slug}" not found or has no tracks`, 
         { status: 404 }
