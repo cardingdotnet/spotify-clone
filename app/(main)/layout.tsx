@@ -8,7 +8,10 @@ export default async function MainLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+
+  // PERF: cookie-only check (middleware already validated). No network call.
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
 
   if (!user) {
     redirect('/login');

@@ -20,20 +20,20 @@ export default function LayoutClient({
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-spotify-black">
+    <div className="flex flex-col h-[100dvh] bg-ink-900">
       <div className="flex flex-1 overflow-hidden relative">
-        <Sidebar 
+        <Sidebar
           isMobileOpen={isMobileSidebarOpen}
           onMobileClose={() => setIsMobileSidebarOpen(false)}
         />
-        
+
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          <TopBar 
-            username={username} 
+          <TopBar
+            username={username}
             displayName={displayName}
             onMobileMenuToggle={() => setIsMobileSidebarOpen(true)}
           />
-          <main className="flex-1 overflow-y-auto bg-gradient-to-b from-[#1f1f1f] to-spotify-black">
+          <main className="flex-1 overflow-y-auto bg-ink-900">
             {children}
           </main>
         </div>

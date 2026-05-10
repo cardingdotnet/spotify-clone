@@ -1,20 +1,14 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { Music, Plus, Library as LibraryIcon } from 'lucide-react';
+import { EmptyState } from '@/components/ui/EmptyState';
 
 export const dynamic = 'force-dynamic';
 
 export default async function LibraryPage() {
   const supabase = await createClient();
-
-  // PERF: skip the network round-trip; middleware already validated the session.
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return null;
 
-  // PERF: read track_count directly from the playlists row (a denormalized
-  // column maintained by a trigger, see database/migration_perf.sql).
-  // The previous version did a count aggregation per row which forced
-  // PostgREST to issue a sub-select per playlist.
   const { data: playlists } = await supabase
     .from('playlists')
     .select('id, name, cover_url, play_count, short_code, created_at, track_count')
@@ -22,78 +16,77 @@ export default async function LibraryPage() {
     .order('updated_at', { ascending: false });
 
   return (
-    <div className="p-4 sm:p-8 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6 sm:mb-8 animate-fade-in-up">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-spotify-green to-emerald-700 flex items-center justify-center shadow-lg">
-            <LibraryIcon className="w-5 h-5 sm:w-6 sm:h-6 text-black" />
-          </div>
-          <div>
-            <h1 className="text-2xl sm:text-4xl font-black tracking-tight">Your Library</h1>
-            <p className="text-xs sm:text-sm text-white/60">
-              {playlists?.length || 0} playlist{playlists?.length === 1 ? '' : 's'}
-            </p>
-          </div>
+    <div className="px-6 sm:px-12 lg:px-16 py-12 sm:py-16 animate-fade-in">
+      {/* Masthead */}
+      <div className="mb-12 sm:mb-16 animate-fade-in-up">
+        <p className="eyebrow text-cream-500 mb-3">Your Collection</p>
+        <h1 className="font-serif text-display-sm sm:text-display text-cream-50 tracking-tight leading-[0.95]">
+          Library
+        </h1>
+        <div className="flex items-center gap-3 mt-6">
+          <p className="text-sm text-cream-300 tracking-tight">
+            {playlists?.length || 0}{' '}
+            <span className="text-cream-500">
+              {playlists?.length === 1 ? 'playlist' : 'playlists'}
+            </span>
+          </p>
         </div>
+        <div className="rule mt-8" />
       </div>
 
       {!playlists || playlists.length === 0 ? (
-        <div className="text-center py-12 sm:py-20 max-w-md mx-auto animate-fade-in-up" style={{ animationDelay: '100ms' }}>
-          <div className="relative w-24 h-24 mx-auto mb-6">
-            <div className="absolute inset-0 bg-spotify-green/20 rounded-full blur-2xl animate-pulse-glow" />
-            <div className="relative w-full h-full bg-gradient-to-br from-spotify-green to-emerald-600 rounded-full flex items-center justify-center shadow-2xl">
-              <Plus className="w-10 h-10 text-black" strokeWidth={3} />
-            </div>
-          </div>
-          <h2 className="text-xl sm:text-2xl font-bold mb-2">Create your first playlist</h2>
-          <p className="text-white/60 mb-6 text-sm sm:text-base">
-            Use the + button in the sidebar to start building your collection
-          </p>
-          <Link href="/search" className="btn-primary inline-block">
-            Browse Music
-          </Link>
-        </div>
+        <EmptyState
+          illustration="cassette"
+          eyebrow="Nothing here yet"
+          title={'Create your first playlist.'}
+          body="Use the + in the sidebar, then start adding tracks from search."
+          action={{ label: 'Browse music', href: '/search' }}
+        />
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
           {playlists.map((playlist, idx) => {
             const trackCount = (playlist as any).track_count || 0;
-            const hue = playlist.id.charCodeAt(0) * 7 % 360;
-            
+            const h1 = (playlist.id.charCodeAt(0) * 13) % 360;
+            const h2 = (h1 + 35) % 360;
+
             return (
               <Link
                 key={playlist.id}
                 href={`/playlist/${playlist.id}`}
                 prefetch
-                className="card group relative animate-fade-in-up"
-                style={{ animationDelay: `${idx * 50}ms` }}
+                className="group block animate-fade-in-up"
+                style={{ animationDelay: `${idx * 40}ms` }}
               >
-                <div className="aspect-square rounded-md mb-2 sm:mb-3 overflow-hidden relative shadow-lg">
+                <div className="aspect-square mb-3 overflow-hidden relative rounded-md cover-placeholder shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)] group-hover:shadow-[0_16px_40px_-12px_rgba(0,0,0,0.8)] transition-shadow duration-500">
                   {playlist.cover_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={playlist.cover_url}
                       alt={playlist.name}
                       loading="lazy"
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
                     />
                   ) : (
-                    <div 
-                      className="w-full h-full flex items-center justify-center"
+                    <div
+                      className="w-full h-full"
                       style={{
-                        background: `linear-gradient(135deg, 
-                          hsl(${hue}, 60%, 40%), 
-                          hsl(${(hue + 60) % 360}, 60%, 30%))`
+                        background: `
+                          radial-gradient(circle at 30% 25%, hsla(${h1}, 60%, 35%, 0.85), transparent 55%),
+                          radial-gradient(circle at 75% 75%, hsla(${h2}, 50%, 25%, 0.9), transparent 60%),
+                          #1A1A20
+                        `,
                       }}
-                    >
-                      <Music className="w-10 h-10 sm:w-12 sm:h-12 text-white/50 group-hover:scale-110 transition-transform duration-500" />
-                    </div>
+                    />
                   )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-ink-900/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 </div>
-                <h3 className="font-semibold truncate text-sm sm:text-base">{playlist.name}</h3>
-                <p className="text-xs text-white/50 mt-0.5 truncate">
+
+                <h3 className="font-serif text-base text-cream-50 leading-tight tracking-tight truncate group-hover:text-coral-500 transition-colors">
+                  {playlist.name}
+                </h3>
+                <p className="text-xs text-cream-500 mt-1 tracking-tight">
                   {trackCount} {trackCount === 1 ? 'track' : 'tracks'}
-                  {playlist.play_count > 0 && ` • ${playlist.play_count} plays`}
+                  {playlist.play_count > 0 && ` · ${playlist.play_count} plays`}
                 </p>
               </Link>
             );

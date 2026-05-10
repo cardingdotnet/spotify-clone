@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search as SearchIcon, Plus, Loader2, Music, Play, Pause, X, Sparkles } from 'lucide-react';
+import { Search as SearchIcon, Plus, Loader2, Music, Play, Pause, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatDuration } from '@/lib/utils';
 import { usePlayerStore, PlayerTrack } from '@/lib/player/store';
@@ -147,84 +147,94 @@ export default function SearchPage() {
   }
 
   return (
-    <div className="p-4 sm:p-8">
-      {/* Search Bar */}
-      <div className="relative max-w-2xl mb-6 sm:mb-8 animate-fade-in-up">
-        <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
-          <SearchIcon className={`w-5 h-5 transition-colors ${
-            query ? 'text-spotify-green' : 'text-white/40'
-          }`} />
+    <div className="px-6 sm:px-12 lg:px-16 py-12 sm:py-16">
+      {/* Masthead */}
+      <div className="mb-8 animate-fade-in-up">
+        <p className="eyebrow text-cream-500 mb-3">Discover</p>
+        <h1 className="font-serif text-display-sm sm:text-display text-cream-50 tracking-tight leading-[0.95] mb-8">
+          Search.
+        </h1>
+
+        {/* Search Bar */}
+        <div className="relative max-w-2xl">
+          <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
+            <SearchIcon
+              className={`w-4 h-4 transition-colors ${
+                query ? 'text-coral-500' : 'text-cream-500'
+              }`}
+              strokeWidth={1.75}
+            />
+          </div>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Songs, artists, genres…"
+            className="input pl-11 pr-11 text-base py-3.5 rounded-md font-serif italic placeholder:not-italic placeholder:font-sans"
+            autoFocus
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-white/[0.05] rounded-md transition-colors"
+            >
+              <X className="w-4 h-4 text-cream-300" strokeWidth={1.75} />
+            </button>
+          )}
         </div>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search for songs, artists, or genres..."
-          className="input pl-12 pr-12 text-base sm:text-lg py-3 sm:py-4 rounded-full"
-          autoFocus
-        />
-        {query && (
-          <button
-            onClick={() => setQuery('')}
-            className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-white/10 rounded-full transition-colors"
-          >
-            <X className="w-4 h-4 text-white/60" />
-          </button>
-        )}
       </div>
 
       {/* Initial state — Suggestions */}
       {!loading && query.length < 2 && (
         <div className="animate-fade-in-up" style={{ animationDelay: '100ms' }}>
-          <div className="flex items-center gap-2 mb-4 text-white/60">
-            <Sparkles className="w-4 h-4" />
-            <span className="text-sm font-semibold uppercase tracking-wider">Try searching for</span>
-          </div>
-          
-          <div className="flex flex-wrap gap-2 mb-12 max-w-2xl">
+          <div className="rule mb-8" />
+          <p className="eyebrow text-cream-500 mb-4">Try searching</p>
+
+          <div className="flex flex-wrap gap-2 mb-16 max-w-2xl">
             {SUGGESTIONS.map((s, idx) => (
               <button
                 key={s}
                 onClick={() => setQuery(s)}
-                className="px-4 py-2 bg-white/[0.06] hover:bg-white/[0.12] rounded-full text-sm border border-white/10 hover:border-white/30 transition-all hover:scale-105 animate-fade-in-up"
-                style={{ animationDelay: `${150 + idx * 50}ms` }}
+                className="px-3.5 py-1.5 bg-transparent hover:bg-white/[0.04] rounded-full text-sm border border-[var(--line-soft)] hover:border-[var(--line-strong)] transition-colors text-cream-200 hover:text-cream-50 tracking-tight font-serif italic animate-fade-in-up"
+                style={{ animationDelay: `${150 + idx * 30}ms` }}
               >
                 {s}
               </button>
             ))}
           </div>
 
-          {/* Browse genres grid */}
-          <div className="space-y-3">
-            <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Browse all</h2>
+          {/* Browse genres — quieter, editorial */}
+          <div>
+            <p className="eyebrow text-cream-500 mb-4">Browse all</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
               {[
-                { name: 'Pop', from: 'from-pink-500', to: 'to-rose-700' },
-                { name: 'Rock', from: 'from-red-500', to: 'to-orange-700' },
-                { name: 'Hip Hop', from: 'from-amber-500', to: 'to-yellow-700' },
-                { name: 'Electronic', from: 'from-cyan-500', to: 'to-blue-700' },
-                { name: 'Jazz', from: 'from-purple-500', to: 'to-indigo-700' },
-                { name: 'Classical', from: 'from-emerald-500', to: 'to-teal-700' },
-                { name: 'Latin', from: 'from-orange-500', to: 'to-red-700' },
-                { name: 'R&B', from: 'from-violet-500', to: 'to-purple-700' },
-                { name: 'Indie', from: 'from-lime-500', to: 'to-green-700' },
-                { name: 'Country', from: 'from-yellow-600', to: 'to-amber-800' },
-              ].map((genre, idx) => (
+                { name: 'Lofi',       hue: 280 },
+                { name: 'Ambient',    hue: 200 },
+                { name: 'House',      hue: 25  },
+                { name: 'Hip Hop',    hue: 45  },
+                { name: 'Jazz',       hue: 320 },
+                { name: 'Classical',  hue: 160 },
+                { name: 'Indie',      hue: 130 },
+                { name: 'Electronic', hue: 220 },
+                { name: 'Arabic',     hue: 5   },
+                { name: 'Soul',       hue: 350 },
+              ].map((g, idx) => (
                 <button
-                  key={genre.name}
-                  onClick={() => setQuery(genre.name.toLowerCase())}
-                  className={`
-                    aspect-[4/3] sm:aspect-square rounded-xl p-4 sm:p-5 
-                    bg-gradient-to-br ${genre.from} ${genre.to}
-                    relative overflow-hidden text-left
-                    hover-lift cursor-pointer
-                    animate-fade-in-up
-                  `}
-                  style={{ animationDelay: `${300 + idx * 50}ms` }}
+                  key={g.name}
+                  onClick={() => setQuery(g.name.toLowerCase())}
+                  className="aspect-[4/3] rounded-md p-4 relative overflow-hidden text-left hover-lift cursor-pointer animate-fade-in-up cover-placeholder transition-all"
+                  style={{
+                    animationDelay: `${300 + idx * 30}ms`,
+                    background: `
+                      radial-gradient(circle at 30% 25%, hsla(${g.hue}, 55%, 30%, 0.85), transparent 55%),
+                      radial-gradient(circle at 75% 75%, hsla(${(g.hue + 35) % 360}, 50%, 22%, 0.9), transparent 60%),
+                      #1A1A20
+                    `,
+                  }}
                 >
-                  <h3 className="font-bold text-base sm:text-lg drop-shadow-lg">{genre.name}</h3>
-                  <div className="absolute -bottom-2 -right-2 w-16 h-16 sm:w-20 sm:h-20 bg-white/10 rounded-full blur-xl" />
-                  <Music className="absolute bottom-2 right-2 w-8 h-8 sm:w-10 sm:h-10 opacity-60 rotate-12" />
+                  <h3 className="font-serif text-lg sm:text-xl text-cream-50 tracking-tight">
+                    {g.name}
+                  </h3>
                 </button>
               ))}
             </div>
@@ -241,13 +251,13 @@ export default function SearchPage() {
 
       {/* No results */}
       {!loading && query.length >= 2 && results.length === 0 && (
-        <div className="text-center py-16 animate-fade-in">
-          <div className="w-16 h-16 mx-auto bg-white/[0.05] rounded-full flex items-center justify-center mb-4">
-            <SearchIcon className="w-8 h-8 text-white/30" />
-          </div>
-          <h3 className="text-lg font-bold mb-2">No results</h3>
-          <p className="text-white/60 text-sm">
-            We couldn&apos;t find anything for &quot;{query}&quot;
+        <div className="py-16 animate-fade-in max-w-md mx-auto text-center">
+          <p className="eyebrow text-cream-500 mb-4">No matches</p>
+          <h3 className="font-serif text-2xl text-cream-50 tracking-tight mb-2">
+            Nothing found.
+          </h3>
+          <p className="text-cream-300 text-sm">
+            Try a different keyword or one of the suggestions above.
           </p>
         </div>
       )}
@@ -255,8 +265,12 @@ export default function SearchPage() {
       {/* Results */}
       {!loading && results.length > 0 && (
         <div className="animate-fade-in">
-          <p className="text-sm text-white/60 mb-3">
-            {results.length} {results.length === 1 ? 'result' : 'results'} for &quot;{query}&quot;
+          <div className="rule mb-6" />
+          <p className="text-sm text-cream-300 mb-4 tracking-tight">
+            <span className="font-medium text-cream-50">{results.length}</span>{' '}
+            <span className="text-cream-500">
+              {results.length === 1 ? 'result for' : 'results for'} &ldquo;{query}&rdquo;
+            </span>
           </p>
           
           <div className="space-y-0.5">
@@ -268,54 +282,55 @@ export default function SearchPage() {
                 <div
                   key={track.id}
                   className={`
-                    flex items-center gap-3 sm:gap-4 px-2 sm:px-4 py-2 rounded-md group
+                    flex items-center gap-3 sm:gap-4 px-2 sm:px-3 py-2 rounded-md group
                     transition-colors
-                    ${isCurrentTrack ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}
+                    ${isCurrentTrack ? 'bg-white/[0.04]' : 'hover:bg-white/[0.03]'}
                   `}
-                  style={{ 
+                  style={{
                     animation: 'fadeInUp 0.3s ease-out backwards',
-                    animationDelay: `${idx * 30}ms`,
+                    animationDelay: `${idx * 25}ms`,
                   }}
                 >
                   {/* Artwork with overlay play button */}
                   <button
                     onClick={() => handlePlay(track, idx)}
-                    className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-md overflow-hidden bg-white/[0.05] flex-shrink-0 group/art"
+                    className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-sm overflow-hidden cover-placeholder flex-shrink-0 group/art"
                   >
                     {track.artworkUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={track.artworkUrl}
                         alt={track.title}
+                        loading="lazy"
                         className="w-full h-full object-cover"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <Music className="w-6 h-6 text-white/40" />
+                        <Music className="w-5 h-5 text-cream-300/50" strokeWidth={1.25} />
                       </div>
                     )}
-                    
+
                     {/* Hover overlay (desktop) */}
-                    <div className="hidden sm:flex absolute inset-0 bg-black/60 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="hidden sm:flex absolute inset-0 bg-ink-900/70 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       {showPause ? (
-                        <Pause className="w-6 h-6 text-white" fill="currentColor" />
+                        <Pause className="w-5 h-5 text-cream-50" fill="currentColor" />
                       ) : (
-                        <Play className="w-6 h-6 text-white ml-0.5" fill="currentColor" />
+                        <Play className="w-5 h-5 text-cream-50 ml-0.5" fill="currentColor" />
                       )}
                     </div>
-                    
+
                     {/* Mobile tap overlay */}
-                    <div className="sm:hidden absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 active:opacity-100 transition-opacity">
+                    <div className="sm:hidden absolute inset-0 bg-ink-900/40 flex items-center justify-center opacity-0 active:opacity-100 transition-opacity">
                       {showPause ? (
-                        <Pause className="w-6 h-6 text-white" fill="currentColor" />
+                        <Pause className="w-5 h-5 text-cream-50" fill="currentColor" />
                       ) : (
-                        <Play className="w-6 h-6 text-white ml-0.5" fill="currentColor" />
+                        <Play className="w-5 h-5 text-cream-50 ml-0.5" fill="currentColor" />
                       )}
                     </div>
-                    
+
                     {/* Now playing indicator */}
                     {isCurrentTrack && isPlaying && (
-                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                      <div className="absolute inset-0 bg-ink-900/70 flex items-center justify-center">
                         <AudioWaves size="md" />
                       </div>
                     )}
@@ -326,18 +341,18 @@ export default function SearchPage() {
                     onClick={() => handlePlay(track, idx)}
                     className="min-w-0 text-left flex-1"
                   >
-                    <p className={`font-semibold truncate text-sm sm:text-base transition-colors ${
-                      isCurrentTrack ? 'text-spotify-green' : 'text-white'
+                    <p className={`font-medium truncate text-sm tracking-tight transition-colors ${
+                      isCurrentTrack ? 'text-coral-500' : 'text-cream-50'
                     }`}>
                       {track.title}
                     </p>
-                    <p className="text-xs sm:text-sm text-white/60 truncate hover:underline">
+                    <p className="text-xs text-cream-300 truncate mt-0.5">
                       {track.artist}
                     </p>
                   </button>
 
                   {/* Duration (desktop) */}
-                  <span className="hidden sm:inline text-sm text-white/60 font-mono tabular-nums">
+                  <span className="hidden sm:inline text-xs text-cream-500 font-mono tabular-nums">
                     {formatDuration(track.duration)}
                   </span>
 
@@ -347,24 +362,24 @@ export default function SearchPage() {
                       onClick={() => setShowPlaylistMenu(
                         showPlaylistMenu === track.id ? null : track.id
                       )}
-                      className="p-2 hover:bg-white/10 rounded-full transition-all hover:scale-110 active:scale-95"
+                      className="p-2 hover:bg-white/[0.06] rounded-md transition-colors text-cream-300 hover:text-cream-50"
                       title="Add to playlist"
                     >
-                      <Plus className="w-5 h-5" />
+                      <Plus className="w-4 h-4" strokeWidth={1.75} />
                     </button>
 
                     {showPlaylistMenu === track.id && (
                       <>
-                        <div 
-                          className="fixed inset-0 z-40" 
-                          onClick={() => setShowPlaylistMenu(null)} 
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setShowPlaylistMenu(null)}
                         />
-                        <div className="absolute right-0 mt-2 w-56 glass-dark rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto animate-scale-in">
-                          <div className="px-4 py-2.5 text-xs uppercase tracking-wider text-white/50 font-bold border-b border-white/10">
+                        <div className="absolute right-0 mt-2 w-56 bg-ink-800 border border-[var(--line-soft)] rounded-lg shadow-2xl z-50 max-h-72 overflow-y-auto animate-scale-in">
+                          <p className="px-4 py-3 eyebrow text-cream-500 border-b border-[var(--line-soft)]">
                             Add to playlist
-                          </div>
+                          </p>
                           {playlists.length === 0 ? (
-                            <div className="px-4 py-6 text-sm text-white/60 text-center">
+                            <div className="px-4 py-6 text-sm text-cream-300 text-center font-serif italic">
                               No playlists yet
                             </div>
                           ) : (
@@ -373,7 +388,7 @@ export default function SearchPage() {
                                 <button
                                   key={p.id}
                                   onClick={() => addToPlaylist(track, p.id)}
-                                  className="w-full text-left px-3 py-2.5 hover:bg-white/10 transition-colors text-sm truncate rounded-md"
+                                  className="w-full text-left px-3 py-2 hover:bg-white/[0.04] transition-colors text-sm truncate rounded-md text-cream-200 hover:text-cream-50 tracking-tight"
                                 >
                                   {p.name}
                                 </button>

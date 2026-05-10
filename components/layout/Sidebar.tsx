@@ -3,10 +3,11 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Home, Search, Library, Plus, Music, X, ListMusic } from 'lucide-react';
+import { Home, Search, Library, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/lib/player/store';
-import AudioWaves from '@/components/ui/AudioWaves';
+import { BrandMark, Wordmark } from '@/components/brand/BrandMark';
+import { NowPlayingBars } from '@/components/brand/PlayBadge';
 import toast from 'react-hot-toast';
 
 interface Playlist {
@@ -48,28 +49,26 @@ export default function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
   }
 
   async function createPlaylist() {
+    if (creating) return;
     setCreating(true);
     try {
+      const name = `New Playlist ${new Date().toLocaleDateString('en', {
+        month: 'short',
+        day: 'numeric',
+      })}`;
       const res = await fetch('/api/playlists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: `My Playlist #${playlists.length + 1}`,
-        }),
+        body: JSON.stringify({ name }),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
-        toast.error(data.error || 'Failed to create playlist');
+        toast.error(data.error || 'Failed to create');
         return;
       }
-
-      toast.success('Playlist created!');
+      toast.success('Playlist created');
       await fetchPlaylists();
       router.push(`/playlist/${data.playlist.id}`);
-    } catch (err) {
-      toast.error('Network error');
     } finally {
       setCreating(false);
     }
@@ -83,47 +82,44 @@ export default function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
 
   return (
     <>
-      {/* Mobile backdrop */}
+      {/* Mobile overlay */}
       {isMobileOpen && (
         <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md z-40 lg:hidden animate-fade-in"
+          className="lg:hidden fixed inset-0 bg-black/70 z-40 backdrop-blur-sm animate-fade-in"
           onClick={onMobileClose}
-          aria-hidden="true"
         />
       )}
 
-      {/* Sidebar */}
       <aside
         className={cn(
-          'flex-shrink-0 flex flex-col p-2 gap-2 transition-transform duration-300 ease-out',
-          'bg-spotify-true-black',
+          'flex flex-col bg-ink-800/95 backdrop-blur-2xl border-r border-[var(--line-soft)]',
+          'transition-transform duration-300 ease-out',
           'lg:relative lg:translate-x-0 lg:w-[260px]',
           'fixed inset-y-0 left-0 z-50 w-[280px]',
           isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         )}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between gap-2 px-4 py-4">
+        {/* Header — masthead style */}
+        <div className="flex items-center justify-between px-5 pt-6 pb-4">
           <Link href="/" className="flex items-center gap-2.5 group">
-            <div className="w-9 h-9 bg-gradient-to-br from-spotify-green to-emerald-600 rounded-lg flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform glow-green">
-              <Music className="w-5 h-5 text-black" strokeWidth={2.5} />
-            </div>
-            <span className="text-xl font-bold tracking-tight">
-              Wavestream
-            </span>
+            <BrandMark size={28} className="opacity-90 group-hover:opacity-100 transition-opacity" />
+            <Wordmark size={18} />
           </Link>
-          
+
           <button
             onClick={onMobileClose}
-            className="lg:hidden p-2 hover:bg-white/10 rounded-full transition-colors"
+            className="lg:hidden p-1.5 hover:bg-white/[0.06] rounded-md transition-colors text-cream-300"
             aria-label="Close menu"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {/* Eyebrow rule */}
+        <div className="rule mx-5" />
+
         {/* Main Nav */}
-        <nav className="bg-spotify-dark-gray/60 backdrop-blur-sm rounded-xl p-2 border border-white/[0.04]">
+        <nav className="px-3 py-4">
           <ul className="space-y-0.5">
             {navItems.map(({ href, label, icon: Icon }) => {
               const active = pathname === href;
@@ -131,22 +127,26 @@ export default function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
                 <li key={href}>
                   <Link
                     href={href}
+                    prefetch
                     className={cn(
-                      'flex items-center gap-4 px-4 py-3 rounded-lg font-semibold transition-all duration-200 relative overflow-hidden group',
+                      'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium tracking-tight',
+                      'transition-colors duration-150 relative group',
                       active
-                        ? 'text-white bg-white/[0.08]'
-                        : 'text-spotify-text-light hover:text-white hover:bg-white/[0.04]'
+                        ? 'text-cream-50 bg-white/[0.05]'
+                        : 'text-cream-300 hover:text-cream-50 hover:bg-white/[0.03]'
                     )}
                   >
-                    {/* Active indicator */}
+                    {/* Coral indicator on active */}
                     {active && (
-                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-7 bg-spotify-green rounded-r-full" />
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-coral-500 rounded-r-full" />
                     )}
-                    
-                    <Icon className={cn(
-                      'w-6 h-6 transition-transform duration-200',
-                      active ? 'scale-110' : 'group-hover:scale-110'
-                    )} />
+                    <Icon
+                      className={cn(
+                        'w-[18px] h-[18px] transition-colors',
+                        active ? 'text-cream-50' : 'text-cream-300 group-hover:text-cream-50'
+                      )}
+                      strokeWidth={1.75}
+                    />
                     <span>{label}</span>
                   </Link>
                 </li>
@@ -155,56 +155,50 @@ export default function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
           </ul>
         </nav>
 
-        {/* Playlists Section */}
-        <div className="bg-spotify-dark-gray/60 backdrop-blur-sm rounded-xl p-2 flex-1 overflow-hidden flex flex-col min-h-0 border border-white/[0.04]">
-          <div className="flex items-center justify-between px-3 py-2.5">
-            <div className="flex items-center gap-2 text-spotify-text-light">
-              <ListMusic className="w-4 h-4" />
-              <span className="font-semibold text-sm">Your Library</span>
-            </div>
+        <div className="rule mx-5" />
+
+        {/* Playlists section */}
+        <div className="flex-1 overflow-hidden flex flex-col min-h-0 px-3 py-4">
+          <div className="flex items-center justify-between px-3 mb-3">
+            <p className="eyebrow text-cream-500">Your Library</p>
             <button
               onClick={createPlaylist}
               disabled={creating}
               title="Create playlist"
-              className="p-2 hover:bg-white/10 rounded-full transition-all hover:scale-110 active:scale-95 disabled:opacity-50"
+              className="p-1.5 hover:bg-white/[0.06] rounded-md transition-colors text-cream-300 hover:text-cream-50 disabled:opacity-40"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-4 h-4" strokeWidth={2} />
             </button>
           </div>
 
-          <ul className="overflow-y-auto flex-1 mt-1 space-y-0.5">
+          <ul className="overflow-y-auto flex-1 space-y-0.5">
             {playlists.length === 0 ? (
-              <li className="px-4 py-6 text-center">
-                <Music className="w-8 h-8 mx-auto text-spotify-text-gray/40 mb-2" />
-                <p className="text-spotify-text-gray text-xs">
+              <li className="px-3 py-6 text-center">
+                <p className="text-sm text-cream-300 font-serif italic">
                   No playlists yet
                 </p>
-                <p className="text-spotify-text-gray/60 text-xs mt-1">
-                  Click + to create one
+                <p className="text-xs text-cream-500 mt-1.5">
+                  Use + to create one
                 </p>
               </li>
             ) : (
               playlists.map((p) => {
                 const active = pathname === `/playlist/${p.id}`;
-                // Highlight if a track from this playlist is currently playing
-                // (We can't easily know without the full data, so just check if active)
-                
                 return (
                   <li key={p.id}>
                     <Link
                       href={`/playlist/${p.id}`}
+                      prefetch
                       className={cn(
-                        'flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-all duration-200 group',
+                        'flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors duration-150',
                         active
-                          ? 'bg-white/[0.08] text-white'
-                          : 'text-spotify-text-light hover:text-white hover:bg-white/[0.04]'
+                          ? 'bg-white/[0.05] text-cream-50'
+                          : 'text-cream-300 hover:text-cream-50 hover:bg-white/[0.03]'
                       )}
                     >
-                      <span className="truncate flex-1">{p.name}</span>
-                      
-                      {/* Show wave animation if active and playing */}
-                      {active && currentTrack && isPlaying && (
-                        <AudioWaves size="sm" />
+                      <span className="truncate flex-1 tracking-tight">{p.name}</span>
+                      {active && currentTrack && (
+                        <NowPlayingBars paused={!isPlaying} />
                       )}
                     </Link>
                   </li>
@@ -212,6 +206,14 @@ export default function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
               })
             )}
           </ul>
+        </div>
+
+        {/* Footer brand line */}
+        <div className="rule mx-5" />
+        <div className="px-5 py-3">
+          <p className="text-[10px] text-cream-500 tracking-wider uppercase">
+            EgMax · v1.0
+          </p>
         </div>
       </aside>
     </>

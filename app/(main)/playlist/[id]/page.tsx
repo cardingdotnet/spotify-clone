@@ -12,6 +12,7 @@ import { formatDuration, getStreamUrl, getStreamUrlWithExtension, getRadioUrl } 
 import { usePlayerStore, PlayerTrack } from '@/lib/player/store';
 import { TrackListSkeleton } from '@/components/ui/Skeletons';
 import AudioWaves from '@/components/ui/AudioWaves';
+import { EmptyState } from '@/components/ui/EmptyState';
 
 interface PlaylistTrack {
   id: number;
@@ -197,19 +198,18 @@ export default function PlaylistPage() {
   if (loading) {
     return (
       <div>
-        {/* Skeleton header */}
-        <div className="bg-gradient-to-b from-purple-900/30 to-transparent p-4 sm:p-8">
-          <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-6">
-            <div className="w-32 h-32 sm:w-56 sm:h-56 mx-auto sm:mx-0 bg-white/[0.05] rounded-md shimmer-bg" />
+        <div className="grain hero-gradient px-6 sm:px-12 lg:px-16 pt-12 sm:pt-16 pb-8">
+          <div className="flex flex-col sm:flex-row sm:items-end gap-6 sm:gap-8">
+            <div className="w-44 h-44 sm:w-56 sm:h-56 mx-auto sm:mx-0 bg-white/[0.04] rounded-md" />
             <div className="flex-1 space-y-3">
-              <div className="h-4 bg-white/[0.05] rounded w-20 shimmer-bg" />
-              <div className="h-12 bg-white/[0.05] rounded w-3/4 shimmer-bg" />
-              <div className="h-4 bg-white/[0.05] rounded w-1/2 shimmer-bg" />
+              <div className="h-3 bg-white/[0.04] rounded w-16" />
+              <div className="h-12 bg-white/[0.04] rounded w-3/4" />
+              <div className="h-3 bg-white/[0.04] rounded w-1/3" />
             </div>
           </div>
         </div>
-        <div className="px-4 sm:px-8">
-          <TrackListSkeleton count={5} />
+        <div className="px-6 sm:px-12 lg:px-16 mt-8">
+          <TrackListSkeleton count={6} />
         </div>
       </div>
     );
@@ -223,37 +223,25 @@ export default function PlaylistPage() {
   const m3uUrl = getStreamUrlWithExtension(playlist.short_code, origin);
   const radioUrl = getRadioUrl(playlist.short_code, origin);
 
-  // Generate dynamic gradient based on playlist ID
-  const hue = playlist.id.charCodeAt(0) * 7 % 360;
-  const headerGradient = `linear-gradient(180deg, 
-    hsla(${hue}, 70%, 35%, 0.6) 0%, 
-    hsla(${hue}, 60%, 25%, 0.3) 30%,
-    transparent 100%)`;
+  // Editorial hero — quiet hero gradient, no shouty colors
+  const hue = playlist.id.charCodeAt(0) * 13 % 360;
+  const h2 = (hue + 35) % 360;
 
   return (
     <div className="animate-fade-in">
       {/* === HERO HEADER === */}
-      <div 
-        className="relative px-4 sm:px-8 pt-6 pb-4 sm:pt-12 sm:pb-6"
-        style={{ background: headerGradient }}
-      >
-        {/* Noise overlay */}
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none mix-blend-overlay" 
-          style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-          }}
-        />
-        
-        <div className="relative flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-6">
-          {/* Album art */}
-          <div className="relative mx-auto sm:mx-0 group">
-            <div className="absolute inset-0 bg-black/30 blur-2xl rounded-md" />
-            <div 
-              className="relative w-40 h-40 sm:w-56 sm:h-56 rounded-md flex items-center justify-center shadow-2xl flex-shrink-0 overflow-hidden"
+      <div className="relative grain hero-gradient px-6 sm:px-12 lg:px-16 pt-12 sm:pt-16 pb-8">
+        <div className="relative flex flex-col sm:flex-row sm:items-end gap-6 sm:gap-8">
+          {/* Cover art */}
+          <div className="relative mx-auto sm:mx-0 group flex-shrink-0">
+            <div
+              className="relative w-44 h-44 sm:w-56 sm:h-56 rounded-md overflow-hidden shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)]"
               style={{
-                background: `linear-gradient(135deg, 
-                  hsl(${hue}, 60%, 50%), 
-                  hsl(${(hue + 60) % 360}, 60%, 35%))`
+                background: `
+                  radial-gradient(circle at 30% 25%, hsla(${hue}, 60%, 35%, 0.85), transparent 55%),
+                  radial-gradient(circle at 75% 75%, hsla(${h2}, 50%, 25%, 0.9), transparent 60%),
+                  #1A1A20
+                `,
               }}
             >
               {playlist.cover_url ? (
@@ -264,20 +252,17 @@ export default function PlaylistPage() {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <Music className="w-20 h-20 sm:w-28 sm:h-28 text-white/50" />
+                <div className="w-full h-full flex items-end p-4">
+                  <Music className="w-10 h-10 text-cream-100/30" strokeWidth={1.25} />
+                </div>
               )}
-              
-              {/* Shine effect */}
-              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-white/20 pointer-events-none" />
             </div>
           </div>
 
           {/* Info */}
           <div className="flex-1 min-w-0 text-center sm:text-left">
-            <p className="text-xs font-bold uppercase tracking-widest mb-2 text-white/70">
-              Playlist
-            </p>
-            
+            <p className="eyebrow text-coral-500 mb-3">Playlist</p>
+
             {editing ? (
               <div className="flex flex-col sm:flex-row items-center gap-2 mb-3 sm:mb-4">
                 <input
@@ -292,54 +277,50 @@ export default function PlaylistPage() {
                     }
                   }}
                   autoFocus
-                  className="text-2xl sm:text-4xl md:text-6xl font-black bg-transparent border-b-2 border-white outline-none flex-1 w-full text-center sm:text-left tracking-tight"
+                  className="font-serif text-3xl sm:text-5xl bg-transparent border-b border-cream-300 outline-none flex-1 w-full text-center sm:text-left tracking-tight text-cream-50 pb-1"
                   maxLength={100}
                 />
                 <div className="flex gap-2">
-                  <button onClick={saveRename} className="btn-primary text-sm py-2 px-4">
-                    Save
-                  </button>
+                  <button onClick={saveRename} className="btn-accent text-sm">Save</button>
                   <button
                     onClick={() => {
                       setEditing(false);
                       setEditName(playlist.name);
                     }}
-                    className="btn-secondary text-sm py-2 px-4"
+                    className="btn-secondary text-sm"
                   >
                     Cancel
                   </button>
                 </div>
               </div>
             ) : (
-              <button 
+              <button
                 onClick={() => setEditing(true)}
-                className="group cursor-pointer mb-3 sm:mb-5 inline-flex items-center gap-2 sm:gap-3 max-w-full"
+                className="group cursor-pointer mb-4 inline-flex items-center gap-3 max-w-full"
                 title="Click to rename"
               >
-                <h1 className="text-3xl sm:text-5xl md:text-7xl font-black tracking-tight truncate">
+                <h1 className="font-serif text-display-sm sm:text-display lg:text-display-lg text-cream-50 leading-[0.95] tracking-tight truncate text-balance">
                   {playlist.name}
                 </h1>
-                <Edit2 className="w-4 h-4 sm:w-6 sm:h-6 opacity-0 sm:group-hover:opacity-60 transition-opacity flex-shrink-0" />
+                <Edit2 className="w-4 h-4 sm:w-5 sm:h-5 text-cream-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
               </button>
             )}
-            
+
             {playlist.description && (
-              <p className="text-white/70 mb-2 text-sm sm:text-base">
+              <p className="text-cream-300 mb-4 text-sm sm:text-base font-serif italic max-w-xl">
                 {playlist.description}
               </p>
             )}
-            
-            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2 gap-y-1 text-xs sm:text-sm text-white/70">
-              <span className="font-semibold text-white">@{playlist.user_id.substring(0, 6)}</span>
-              <span>•</span>
-              <span>{tracks.length} {tracks.length === 1 ? 'song' : 'songs'}</span>
+
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2 gap-y-1 text-xs sm:text-sm text-cream-500 tracking-tight">
+              <span>{tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}</span>
               {tracks.length > 0 && (
                 <>
-                  <span>•</span>
+                  <span className="text-cream-500/50">·</span>
                   <span>{formatDuration(totalDuration)}</span>
                 </>
               )}
-              <span>•</span>
+              <span className="text-cream-500/50">·</span>
               <span>{playlist.play_count} plays</span>
             </div>
           </div>
@@ -347,75 +328,65 @@ export default function PlaylistPage() {
       </div>
 
       {/* === ACTION BAR === */}
-      <div className="px-4 sm:px-8 py-4 sm:py-6 flex items-center gap-4 sm:gap-6">
+      <div className="px-6 sm:px-12 lg:px-16 py-6 flex items-center gap-4">
         <button
           onClick={isPlaylistPlaying ? togglePlay : playAll}
           disabled={tracks.length === 0}
-          className={`
-            w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center 
-            transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed 
-            shadow-2xl group
-            ${isPlaylistPlaying 
-              ? 'bg-spotify-green scale-100 hover:scale-105 glow-green-strong' 
-              : 'bg-spotify-green hover:scale-110 hover:bg-spotify-green-hover hover:shadow-spotify-green/50'
-            }
-          `}
+          className="w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center bg-coral-500 hover:bg-coral-400 active:bg-coral-600 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_8px_24px_-6px_rgba(255,94,58,0.5)] hover:shadow-[0_12px_32px_-6px_rgba(255,94,58,0.6)] active:scale-[0.97] group"
           title={isPlaylistPlaying ? 'Pause' : 'Play'}
         >
           {isPlaylistPlaying ? (
-            <Pause className="w-6 h-6 sm:w-7 sm:h-7 text-black" fill="currentColor" />
+            <Pause className="w-5 h-5 sm:w-6 sm:h-6 text-cream-50" fill="currentColor" />
           ) : (
-            <Play className="w-6 h-6 sm:w-7 sm:h-7 text-black ml-0.5 sm:ml-1" fill="currentColor" />
+            <Play className="w-5 h-5 sm:w-6 sm:h-6 text-cream-50 ml-0.5" fill="currentColor" />
           )}
         </button>
 
         <button
           onClick={() => setShowShareCard(!showShareCard)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] backdrop-blur-sm border border-white/10 transition-all hover:scale-105"
+          className="btn-secondary"
         >
-          <Share2 className="w-4 h-4 text-spotify-green" />
-          <span className="text-sm font-semibold">Share</span>
+          <Share2 className="w-4 h-4" strokeWidth={1.75} />
+          Share
         </button>
 
-        <button className="ml-auto p-2 rounded-full hover:bg-white/[0.08] transition-colors">
-          <MoreHorizontal className="w-6 h-6 text-white/60" />
+        <button className="ml-auto w-10 h-10 rounded-full hover:bg-white/[0.05] transition-colors flex items-center justify-center text-cream-300 hover:text-cream-50">
+          <MoreHorizontal className="w-5 h-5" strokeWidth={1.75} />
         </button>
       </div>
 
-      {/* === SHARE CARD (Collapsible) === */}
+      {/* === SHARE CARD === */}
       {showShareCard && (
-        <div className="px-4 sm:px-8 mb-6 animate-fade-in-up">
-          <div className="card-glass p-4 sm:p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-spotify-green/20 flex items-center justify-center">
-                <Share2 className="w-5 h-5 text-spotify-green" />
-              </div>
+        <div className="px-6 sm:px-12 lg:px-16 mb-8 animate-fade-in-up">
+          <div className="card-elevated p-6">
+            <div className="flex items-baseline justify-between mb-6">
               <div>
-                <h2 className="text-base sm:text-lg font-bold">Stream Anywhere</h2>
-                <p className="text-xs text-white/60">Pick the URL for your target player</p>
+                <p className="eyebrow text-coral-500 mb-2">Share</p>
+                <h2 className="font-serif text-2xl text-cream-50 tracking-tight">Stream anywhere</h2>
               </div>
+              <p className="text-xs text-cream-500 hidden sm:block">Pick the URL for your player</p>
             </div>
 
-            {/* IMVU Radio URL — PRIMARY */}
-            <div className="mb-3 p-3 rounded-lg bg-spotify-green/10 border border-spotify-green/30">
-              <label className="text-[10px] text-spotify-green uppercase font-bold tracking-wider flex items-center gap-1.5">
-                <Volume2 className="w-3 h-3" />
-                IMVU Radio URL (recommended for IMVU)
-              </label>
-              <p className="text-[11px] text-white/60 mt-0.5 mb-2">
-                Continuous MP3 stream — paste this into IMVU&apos;s room radio.
+            {/* IMVU Radio URL — primary */}
+            <div className="mb-4 p-4 rounded-md bg-coral-500/[0.06] border border-coral-500/30">
+              <div className="flex items-center gap-2 mb-2">
+                <Volume2 className="w-3.5 h-3.5 text-coral-500" strokeWidth={2} />
+                <p className="eyebrow text-coral-500">IMVU radio · recommended</p>
+              </div>
+              <p className="text-xs text-cream-300 mb-3">
+                Continuous MP3 stream. Paste into IMVU&apos;s room radio dialog.
               </p>
               <div className="flex gap-2">
                 <input
                   type="text"
                   readOnly
                   value={radioUrl}
-                  className="input flex-1 font-mono text-xs sm:text-sm"
+                  className="input flex-1 font-mono text-xs"
                   onClick={(e) => (e.target as HTMLInputElement).select()}
                 />
                 <button
                   onClick={() => copyToClipboard(radioUrl, setCopiedRadio)}
-                  className="btn-primary flex items-center justify-center gap-2 whitespace-nowrap text-sm py-2.5 px-4"
+                  className="btn-accent text-sm whitespace-nowrap"
                   disabled={tracks.length === 0}
                 >
                   {copiedRadio ? <><Check className="w-4 h-4" /> Copied</> : <><Copy className="w-4 h-4" /> Copy</>}
@@ -423,22 +394,20 @@ export default function PlaylistPage() {
               </div>
             </div>
 
-            {/* Short URL — for VLC/browsers */}
-            <div className="mb-3">
-              <label className="text-[10px] text-white/50 uppercase font-bold tracking-wider">
-                Playlist URL — VLC / browsers
-              </label>
-              <div className="flex gap-2 mt-1.5">
+            {/* Short URL */}
+            <div className="mb-4">
+              <p className="eyebrow text-cream-500 mb-2">Playlist URL · VLC / browsers</p>
+              <div className="flex gap-2">
                 <input
                   type="text"
                   readOnly
                   value={cleanUrl}
-                  className="input flex-1 font-mono text-xs sm:text-sm"
+                  className="input flex-1 font-mono text-xs"
                   onClick={(e) => (e.target as HTMLInputElement).select()}
                 />
                 <button
                   onClick={() => copyToClipboard(cleanUrl, setCopiedClean)}
-                  className="btn-secondary flex items-center justify-center gap-2 whitespace-nowrap text-sm py-2.5 px-4"
+                  className="btn-secondary text-sm whitespace-nowrap"
                   disabled={tracks.length === 0}
                 >
                   {copiedClean ? <><Check className="w-4 h-4" /> Copied</> : <><Copy className="w-4 h-4" /> Copy</>}
@@ -447,21 +416,19 @@ export default function PlaylistPage() {
             </div>
 
             {/* M3U URL */}
-            <div className="mb-4">
-              <label className="text-[10px] text-white/50 uppercase font-bold tracking-wider">
-                .m3u URL (with extension)
-              </label>
-              <div className="flex gap-2 mt-1.5">
+            <div className="mb-6">
+              <p className="eyebrow text-cream-500 mb-2">.m3u with extension</p>
+              <div className="flex gap-2">
                 <input
                   type="text"
                   readOnly
                   value={m3uUrl}
-                  className="input flex-1 font-mono text-xs sm:text-sm"
+                  className="input flex-1 font-mono text-xs"
                   onClick={(e) => (e.target as HTMLInputElement).select()}
                 />
                 <button
                   onClick={() => copyToClipboard(m3uUrl, setCopiedM3u)}
-                  className="btn-secondary flex items-center justify-center gap-2 whitespace-nowrap text-sm py-2.5 px-4"
+                  className="btn-secondary text-sm whitespace-nowrap"
                   disabled={tracks.length === 0}
                 >
                   {copiedM3u ? <><Check className="w-4 h-4" /> Copied</> : <><Copy className="w-4 h-4" /> Copy</>}
@@ -469,36 +436,39 @@ export default function PlaylistPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-1.5">
-              <a
-                href={radioUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] rounded-full text-xs transition-colors"
-              >
-                <ExternalLink className="w-3 h-3" />
-                Test radio
-              </a>
-              <a
-                href={cleanUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] rounded-full text-xs transition-colors"
-              >
-                <ExternalLink className="w-3 h-3" />
-                Test playlist
-              </a>
-              {['IMVU', 'VLC', 'Browsers', 'Mobile'].map(label => (
-                <span key={label} className="px-2.5 py-1 bg-white/[0.06] rounded-full text-xs">
-                  ✓ {label}
-                </span>
-              ))}
+            <div className="rule mb-4" />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-1.5">
+                {['IMVU', 'VLC', 'Browsers', 'Mobile'].map(label => (
+                  <span key={label} className="px-2.5 py-1 bg-white/[0.04] border border-[var(--line-soft)] rounded-full text-[11px] text-cream-300 tracking-tight">
+                    {label}
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-3">
+                <a
+                  href={radioUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-cream-300 hover:text-coral-500 transition-colors inline-flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Test radio
+                </a>
+                <a
+                  href={cleanUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-cream-300 hover:text-coral-500 transition-colors inline-flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Test playlist
+                </a>
+              </div>
             </div>
 
             {tracks.length === 0 && (
-              <p className="mt-4 text-sm text-yellow-400 flex items-center gap-2">
-                ⚠️ Add tracks before sharing
-              </p>
+              <p className="mt-4 text-sm text-ember-500">Add tracks before sharing.</p>
             )}
           </div>
         </div>
@@ -507,32 +477,21 @@ export default function PlaylistPage() {
       {/* === TRACK LIST === */}
       <div className="px-4 sm:px-8 pb-8">
         {tracks.length === 0 ? (
-          <div className="text-center py-16 max-w-sm mx-auto">
-            <div className="relative w-20 h-20 mx-auto mb-4">
-              <div className="absolute inset-0 bg-spotify-green/10 rounded-full blur-2xl" />
-              <div className="relative w-full h-full bg-white/[0.04] rounded-full flex items-center justify-center border border-white/10">
-                <Music className="w-10 h-10 text-white/30" />
-              </div>
-            </div>
-            <h3 className="text-lg font-bold mb-2">It&apos;s quiet here...</h3>
-            <p className="text-white/60 mb-6 text-sm">
-              Search for music to start building your playlist
-            </p>
-            <button
-              onClick={() => router.push('/search')}
-              className="btn-primary"
-            >
-              Find Music
-            </button>
-          </div>
+          <EmptyState
+            illustration="wave"
+            eyebrow="Empty playlist"
+            title="It's quiet in here."
+            body="Search SoundCloud and add tracks to bring this playlist to life."
+            action={{ label: 'Find music', href: '/search' }}
+          />
         ) : (
           <>
             {/* Desktop track header */}
-            <div className="hidden sm:grid grid-cols-[40px,auto,1fr,auto,40px] gap-4 px-4 py-2 text-xs uppercase tracking-wider text-white/50 border-b border-white/[0.08] mb-2 font-semibold">
+            <div className="hidden sm:grid grid-cols-[40px,auto,1fr,auto,40px] gap-4 px-4 py-3 text-eyebrow uppercase tracking-wider text-cream-500 border-b border-[var(--line-soft)] mb-2 font-semibold">
               <span>#</span>
               <span></span>
               <span>Title</span>
-              <Clock className="w-4 h-4" />
+              <Clock className="w-3.5 h-3.5" strokeWidth={1.5} />
               <span></span>
             </div>
 
@@ -545,14 +504,14 @@ export default function PlaylistPage() {
                   <div
                     key={track.id}
                     className={`
-                      flex sm:grid sm:grid-cols-[40px,auto,1fr,auto,40px] 
+                      flex sm:grid sm:grid-cols-[40px,auto,1fr,auto,40px]
                       gap-3 sm:gap-4 px-2 sm:px-4 py-2 rounded-md group items-center
                       transition-colors
-                      ${isCurrentTrack ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}
+                      ${isCurrentTrack ? 'bg-white/[0.04]' : 'hover:bg-white/[0.03]'}
                     `}
-                    style={{ 
+                    style={{
                       animation: 'fadeInUp 0.3s ease-out backwards',
-                      animationDelay: `${idx * 30}ms`,
+                      animationDelay: `${idx * 25}ms`,
                     }}
                   >
                     {/* Index/Play (desktop) */}
@@ -561,15 +520,15 @@ export default function PlaylistPage() {
                         <AudioWaves size="md" className="group-hover:hidden" />
                       ) : (
                         <span className={`
-                          font-mono text-sm group-hover:hidden
-                          ${isCurrentTrack ? 'text-spotify-green' : 'text-white/50'}
+                          font-mono text-xs group-hover:hidden tabular-nums
+                          ${isCurrentTrack ? 'text-coral-500' : 'text-cream-500'}
                         `}>
-                          {idx + 1}
+                          {String(idx + 1).padStart(2, '0')}
                         </span>
                       )}
                       <button
                         onClick={() => playTrackAt(idx)}
-                        className="hidden group-hover:block text-white hover:scale-110 transition-transform"
+                        className="hidden group-hover:block text-cream-50 hover:text-coral-500 transition-colors"
                       >
                         {showPause ? (
                           <Pause className="w-4 h-4" fill="currentColor" />
@@ -582,26 +541,27 @@ export default function PlaylistPage() {
                     {/* Artwork */}
                     <button
                       onClick={() => playTrackAt(idx)}
-                      className="relative w-12 h-12 sm:w-10 sm:h-10 rounded overflow-hidden bg-white/[0.05] flex-shrink-0 group/art"
+                      className="relative w-12 h-12 sm:w-10 sm:h-10 rounded-sm overflow-hidden cover-placeholder flex-shrink-0 group/art"
                     >
                       {track.artwork_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={track.artwork_url}
                           alt=""
+                          loading="lazy"
                           className="w-full h-full object-cover"
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
-                          <Music className="w-5 h-5 text-white/40" />
+                          <Music className="w-4 h-4 text-cream-300/40" strokeWidth={1.25} />
                         </div>
                       )}
                       {/* Mobile play overlay */}
-                      <div className="sm:hidden absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-active/art:opacity-100 transition-opacity">
+                      <div className="sm:hidden absolute inset-0 bg-ink-900/50 flex items-center justify-center opacity-0 group-active/art:opacity-100 transition-opacity">
                         {showPause ? (
-                          <Pause className="w-6 h-6 text-white" fill="currentColor" />
+                          <Pause className="w-5 h-5 text-cream-50" fill="currentColor" />
                         ) : (
-                          <Play className="w-6 h-6 text-white ml-0.5" fill="currentColor" />
+                          <Play className="w-5 h-5 text-cream-50 ml-0.5" fill="currentColor" />
                         )}
                       </div>
                     </button>
@@ -612,28 +572,28 @@ export default function PlaylistPage() {
                       className="min-w-0 text-left flex-1"
                     >
                       <p className={`
-                        font-semibold truncate text-sm sm:text-base transition-colors
-                        ${isCurrentTrack ? 'text-spotify-green' : 'text-white'}
+                        font-medium truncate text-sm tracking-tight transition-colors
+                        ${isCurrentTrack ? 'text-coral-500' : 'text-cream-50'}
                       `}>
                         {track.title}
                       </p>
-                      <p className="text-xs sm:text-sm text-white/60 truncate hover:underline">
+                      <p className="text-xs text-cream-300 truncate mt-0.5">
                         {track.artist}
                       </p>
                     </button>
 
                     {/* Duration */}
-                    <span className="hidden sm:inline text-sm text-white/60 font-mono tabular-nums">
+                    <span className="hidden sm:inline text-xs text-cream-500 font-mono tabular-nums">
                       {formatDuration(track.duration_ms)}
                     </span>
 
                     {/* Remove */}
                     <button
                       onClick={() => removeTrack(track.id)}
-                      className="p-2 hover:bg-white/10 rounded-full transition-colors flex-shrink-0 opacity-60 sm:opacity-0 sm:group-hover:opacity-60 hover:!opacity-100"
+                      className="p-2 hover:bg-white/[0.06] rounded-md transition-colors flex-shrink-0 opacity-0 sm:group-hover:opacity-100 text-cream-500 hover:text-coral-500"
                       title="Remove"
                     >
-                      <Trash2 className="w-4 h-4 hover:text-red-400 transition-colors" />
+                      <Trash2 className="w-4 h-4" strokeWidth={1.5} />
                     </button>
                   </div>
                 );
@@ -643,12 +603,12 @@ export default function PlaylistPage() {
         )}
 
         {/* Delete playlist (subtle) */}
-        <div className="mt-12 pt-6 border-t border-white/[0.04]">
+        <div className="mt-16 pt-6 rule">
           <button
             onClick={deletePlaylist}
-            className="text-red-400/70 hover:text-red-400 text-sm flex items-center gap-2 transition-colors"
+            className="text-cream-500 hover:text-coral-500 text-sm flex items-center gap-2 transition-colors"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-4 h-4" strokeWidth={1.5} />
             Delete this playlist
           </button>
         </div>
