@@ -32,10 +32,14 @@ Radio Stream Endpoint         → Long-lived Node response (audio/mpeg)
 > 300s on Pro with extended duration. When the cap is hit Vercel kills the
 > response and IMVU's player auto-reconnects to the same URL.
 >
-> The endpoint includes **reconnect-resume**: each listener's last position
-> is remembered in-process for 10 minutes, so on reconnect they continue
-> from the next track instead of restarting at track 1. This makes Vercel
-> usable, but the listener will still hear a brief gap every N seconds.
+> The endpoint runs as a **shared synchronized broadcast**: every listener
+> on the same `{code}` hears the same audio at the same wall-clock instant,
+> Icecast-style. A late joiner drops into whatever is playing right now
+> (mid-track if needed), not at track 1. This means reconnects after a
+> Vercel timeout are also "free" — the listener simply rejoins the live
+> timeline, no per-listener cursor needed. They will still hear a brief
+> audio gap each time the connection drops, but they stay in sync with
+> everyone else in the room.
 >
 > For a truly seamless infinite stream — what you want for an IMVU room —
 > deploy to a host that supports long-lived HTTP responses:

@@ -1,34 +1,68 @@
 /**
- * IMVU-Compatible Radio Endpoint
+ * IMVU-Compatible Radio Endpoint — SHARED BROADCAST TIMELINE
  *
  * URL: /radio/{code}.mp3
  *
- * Emits a continuous Icecast-style MP3 byte stream that IMVU's room radio
- * accepts. The endpoint:
+ * Behaves like an Icecast radio station: every listener connected to the
+ * same {code} hears the same audio at the same wall-clock instant. A late
+ * joiner does NOT start at track 1; they drop into whatever is playing
+ * *right now*, mid-track if necessary. The playlist loops forever.
  *
- *   1. Resolves the first track in parallel with the DB query (fast TTFB).
- *   2. Pre-resolves the next track in the background while the current one
- *      is still piping (zero gap between songs).
- *   3. Fetches HLS segments with a sliding window of 3 in parallel
- *      (no head-of-line blocking, no buffer underrun).
- *   4. Caches track metadata + signed URLs in-process so loops & reconnects
- *      avoid extra round trips.
- *   5. **Resumes from the listener's last position on reconnect** so when
- *      the connection drops (host time-limit, network blip, IMVU keep-alive
- *      timeout) the listener doesn't restart at track 1.
+ * ───────────── HOW THE TIMELINE WORKS ─────────────
  *
- * IMPORTANT — about restarts on Vercel:
+ * The first listener to ever connect to a given {code} writes a single
+ * `broadcast_started_at` timestamp (the "epoch") into the playlists row,
+ * via the atomic `start_broadcast_if_unset` RPC. Every subsequent listener
+ * reads that same epoch and computes:
  *
- *   Vercel Serverless functions have a hard execution-time cap (10s Hobby,
- *   60s/300s Pro depending on tier). When the cap is hit, the response is
- *   killed mid-stream. IMVU's player auto-reconnects to the same URL, and
- *   without resume support the listener would restart at track 1 every
- *   N seconds. The reconnect-resume logic below mitigates that by tracking
- *   each listener's last position so they continue forward, but the only
- *   true fix is to host this endpoint somewhere that supports long-lived
- *   responses: Fly.io, Railway, Render, a VPS, or a Cloudflare Worker.
+ *     elapsedMs       = now() - epoch
+ *     elapsedInLoopMs = elapsedMs % totalPlaylistDurationMs
+ *     → walk track durations until we find the current track + offset
  *
- *   See README.md for hosting recommendations.
+ * Because the math is deterministic and stateless, this works on serverless
+ * (each request computes the same answer independently — no central process
+ * holding state, no Redis, no in-memory broadcast bus).
+ *
+ * ───────────── HOW MID-TRACK JOINS WORK ─────────────
+ *
+ * Once we know "current track + 47000ms in," we start streaming that track
+ * from the right point:
+ *
+ *   - Progressive MP3 → HTTP Range request, byte offset estimated from the
+ *     track's bitrate (content_length ÷ duration × offset_seconds). Slight
+ *     VBR drift is acceptable for an IMVU room radio (<1s typically).
+ *
+ *   - HLS → parse the manifest, sum #EXTINF durations until we cross the
+ *     offset, start from that segment. Segment-level granularity (2–6s);
+ *     listener may start a fraction of a second early or late — fine.
+ *
+ * ───────────── WHY WE PACE THE OUTPUT ─────────────
+ *
+ * We THROTTLE outgoing bytes to ~track-bitrate. If we just dumped data as
+ * fast as SoundCloud's CDN serves it, the listener's player would buffer
+ * minutes ahead of the wall-clock timeline — then the *next* listener who
+ * joins would compute a different "now" position than what the first
+ * listener is hearing. By pacing at real-time speed, the bytes leaving our
+ * server roughly track wall-clock, and synchronisation holds.
+ *
+ * This is what real Icecast servers do; it's not optional for sync.
+ *
+ * ───────────── WHAT WE DROPPED ─────────────
+ *
+ * The previous per-listener `listenerCursor` resume logic is GONE. With a
+ * shared timeline, "resume on reconnect" *is* "rejoin the broadcast at
+ * wall-clock now" — it falls out for free. Simpler and more correct.
+ *
+ * ───────────── HOSTING NOTE ─────────────
+ *
+ * Vercel Serverless still has a hard execution-time cap. When it kicks in,
+ * the response is killed mid-stream and IMVU reconnects. Each reconnect
+ * computes the live position fresh, so listeners DON'T restart at track 1 —
+ * they drop into wherever the timeline is at that moment. The only
+ * remaining artefact is a brief audio gap during the reconnect (tens of ms
+ * to a couple of seconds depending on the player). For seamless playback
+ * use a host that supports long-lived responses (Fly.io, Railway, Render,
+ * a VPS, or a Cloudflare Worker).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -41,7 +75,6 @@ export const runtime = 'nodejs';
 // NOTE: maxDuration deliberately NOT set. The default on Vercel is the
 // platform tier's max; on long-running hosts (Fly/Railway/VPS) there is no
 // limit. Don't reintroduce this — it caps the stream length artificially.
-// (Was: `export const maxDuration = 300;` — the source of the 5-minute restart bug.)
 
 interface PlaylistRow {
   playlist_id: string;
@@ -53,6 +86,8 @@ interface PlaylistRow {
   track_artist: string;
   track_duration_ms: number;
   track_position: number;
+  /** ISO timestamp; null if the broadcast hasn't started yet. */
+  broadcast_started_at: string | null;
 }
 
 const RADIO_HEADERS = {
@@ -77,7 +112,12 @@ const SC_FETCH_HEADERS = {
 /** How many HLS segments to fetch in parallel ahead of the playhead. */
 const HLS_PREFETCH = 3;
 
-/* ─────────────── Playlist row cache (avoid Supabase round trip on reconnect) ─────────────── */
+/** Assumed bitrate when we can't infer one from a Content-Length header.
+ *  128kbps is what SoundCloud's MP3 transcodings use in practice. */
+const ASSUMED_BITRATE_KBPS = 128;
+const ASSUMED_BYTES_PER_SEC = (ASSUMED_BITRATE_KBPS * 1000) / 8; // 16000 B/s
+
+/* ─────────────── Playlist row cache ─────────────── */
 const PLAYLIST_TTL_MS = 30 * 1000;
 const playlistCache = new Map<
   string,
@@ -102,48 +142,114 @@ function setCachedPlaylist(code: string, rows: PlaylistRow[]): void {
   playlistCache.set(code, { rows, expiresAt: Date.now() + PLAYLIST_TTL_MS });
 }
 
-/* ─────────────── Listener cursor (resume on reconnect) ─────────────── */
+/* ─────────────── Timeline math ─────────────── */
+
+interface TimelinePosition {
+  /** 0-based index into trackIds. */
+  trackIndex: number;
+  /** Milliseconds INTO the current track. */
+  offsetMs: number;
+}
+
 /**
- * Tracks where each listener was when their connection last closed, so on
- * reconnect we can resume from the *next* track instead of starting over.
- *
- * Key: `${code}:${listener-fingerprint}` — IP-hash + UA hash.
- * Value: index of the LAST track that was being played + when it was set.
- *
- * The cursor expires after CURSOR_TTL_MS to avoid a listener resuming days
- * later from a stale spot. The same TTL also means an IP rotation eventually
- * starts fresh from track 0, which is fine.
+ * Given the broadcast epoch, the track durations, and "now," figure out which
+ * track should be playing and how far into it we are. Pure function — same
+ * inputs always give the same answer.
  */
-const CURSOR_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const listenerCursor = new Map<string, { idx: number; expiresAt: number }>();
-
-function getListenerCursor(key: string): number | null {
-  const e = listenerCursor.get(key);
-  if (!e) return null;
-  if (Date.now() > e.expiresAt) {
-    listenerCursor.delete(key);
-    return null;
+function computeTimelinePosition(
+  epochMs: number,
+  nowMs: number,
+  durationsMs: number[]
+): TimelinePosition {
+  const total = durationsMs.reduce((a, b) => a + b, 0);
+  if (total <= 0) {
+    return { trackIndex: 0, offsetMs: 0 };
   }
-  return e.idx;
+  // Guard against clock drift / pre-epoch joins.
+  const elapsedRaw = nowMs - epochMs;
+  const elapsed = elapsedRaw < 0 ? 0 : elapsedRaw;
+  let inLoop = elapsed % total;
+
+  for (let i = 0; i < durationsMs.length; i++) {
+    const d = durationsMs[i];
+    if (d <= 0) continue;
+    if (inLoop < d) {
+      return { trackIndex: i, offsetMs: inLoop };
+    }
+    inLoop -= d;
+  }
+  // Numerical edge case (shouldn't happen with positive durations).
+  return { trackIndex: 0, offsetMs: 0 };
 }
 
-function setListenerCursor(key: string, idx: number): void {
-  if (listenerCursor.size > 5000) {
-    // Crude eviction
-    const firstKey = listenerCursor.keys().next().value;
-    if (firstKey !== undefined) listenerCursor.delete(firstKey);
+/* ─────────────── Pacing helpers ─────────────── */
+
+/**
+ * Real-time pacer. Tracks how many bytes we've emitted at a target rate and
+ * stalls (await sleep) whenever we're ahead of wall-clock. This is what keeps
+ * all listeners on the same timeline — without this, fast CDN delivery would
+ * push our stream minutes ahead of the broadcast clock.
+ */
+class BytePacer {
+  private startedAt = Date.now();
+  private bytesSent = 0;
+  private bytesPerSec: number;
+
+  constructor(bytesPerSec: number) {
+    this.bytesPerSec = Math.max(1, bytesPerSec);
   }
-  listenerCursor.set(key, { idx, expiresAt: Date.now() + CURSOR_TTL_MS });
+
+  /** Reset the clock; called at each track boundary so transitions don't accrue lag. */
+  reset(initialBytes = 0, initialOffsetMs = 0): void {
+    this.bytesSent = initialBytes;
+    // Pretend the pacer started `initialOffsetMs` ago — i.e. we already "owe"
+    // the listener that much real time when joining mid-track.
+    this.startedAt = Date.now() - initialOffsetMs;
+  }
+
+  setRate(bytesPerSec: number): void {
+    this.bytesPerSec = Math.max(1, bytesPerSec);
+  }
+
+  /**
+   * Account for `n` bytes about to be sent and sleep if we're ahead of
+   * real-time. Returns once it's OK to actually emit them.
+   */
+  async account(n: number, signal: AbortSignal): Promise<void> {
+    this.bytesSent += n;
+    const targetMs = (this.bytesSent / this.bytesPerSec) * 1000;
+    const elapsedMs = Date.now() - this.startedAt;
+    const aheadMs = targetMs - elapsedMs;
+    if (aheadMs > 5) {
+      // 5ms slack to avoid death-by-a-thousand-tiny-sleeps.
+      await sleep(aheadMs, signal);
+    }
+  }
 }
 
-/** Build a stable listener fingerprint from IP + UA. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const t = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(t);
+      resolve();
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/* ─────────────── Listener fingerprint (logging only) ─────────────── */
+
 async function listenerKey(code: string, request: NextRequest): Promise<string> {
   const ip =
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     request.headers.get('x-real-ip') ||
     'unknown';
   const ua = request.headers.get('user-agent') || 'unknown';
-  // Truncate UA to a coarse fingerprint so minor version bumps don't break resume.
   const uaCoarse = ua.substring(0, 40);
   const raw = `${code}|${ip}|${uaCoarse}`;
   return `${code}:${await sha256(raw)}`;
@@ -194,18 +300,41 @@ export async function GET(
   const playlistName = rows[0].playlist_name;
   const playlistId = rows[0].playlist_id;
   const trackIds = rows.map((r) => r.track_id);
+  const durationsMs = rows.map((r) => r.track_duration_ms || 0);
 
-  // ─── Resume support ───
+  // ─── Establish or read the broadcast epoch ───
+  let epochIso = rows[0].broadcast_started_at;
+  if (!epochIso) {
+    // First listener ever — claim the epoch atomically.
+    const supabase = createAdminSupabaseClient();
+    const { data: claimed, error: claimErr } = await supabase.rpc(
+      'start_broadcast_if_unset',
+      { p_code: code }
+    );
+    if (claimErr) {
+      console.error('[radio] start_broadcast_if_unset error:', claimErr);
+      // Fall back to "now" — slightly worse sync but the stream still works.
+      epochIso = new Date().toISOString();
+    } else {
+      epochIso = claimed as string;
+    }
+    // Bust the playlist cache so the next request sees the new epoch without waiting for TTL.
+    playlistCache.delete(code);
+    if (rows.length > 0) {
+      const updated = rows.map((r) => ({ ...r, broadcast_started_at: epochIso }));
+      setCachedPlaylist(code, updated);
+    }
+  }
+  const epochMs = epochIso ? Date.parse(epochIso) : Date.now();
+
+  // ─── Compute "where on the timeline am I joining?" ───
+  const start = computeTimelinePosition(epochMs, Date.now(), durationsMs);
+
   const lkey = await listenerKey(code, request);
-  const lastIdx = getListenerCursor(lkey);
-  // Start at the NEXT track after the last one played, so we don't replay
-  // a track the listener just heard. (Wrap to 0 if at end.)
-  const startIndex =
-    lastIdx === null ? 0 : (lastIdx + 1) % trackIds.length;
-
   console.log(
     `[radio] ${code} -> "${playlistName}" (${trackIds.length} tracks). ` +
-    `start=${startIndex} ${lastIdx !== null ? '(resume)' : '(fresh)'} ` +
+    `epoch=${epochIso} join@track=${start.trackIndex} offset=${start.offsetMs}ms ` +
+    `lkey=${lkey.substring(0, 12)} ` +
     `UA="${(request.headers.get('user-agent') || '').substring(0, 60)}"`
   );
 
@@ -220,19 +349,23 @@ export async function GET(
   const sc = getSoundCloudClient();
   const abortController = new AbortController();
 
-  // Pre-warm the first track resolution (parallel with framework header send).
-  const firstResolvePromise = sc.resolveMp3Stream(trackIds[startIndex]);
-
   request.signal.addEventListener('abort', () => {
     console.log(`[radio] ${code} client disconnected`);
     abortController.abort();
   });
 
+  // Pre-warm the first track resolution.
+  const firstResolvePromise = sc.resolveMp3Stream(trackIds[start.trackIndex]);
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      let trackIndex = startIndex;
+      let trackIndex = start.trackIndex;
+      let initialOffsetMs = start.offsetMs;
       let consecutiveFailures = 0;
       const MAX_CONSECUTIVE_FAILURES = trackIds.length * 2;
+
+      // Pacer — set to default rate; refined per-track once we learn the real bitrate.
+      const pacer = new BytePacer(ASSUMED_BYTES_PER_SEC);
 
       let nextTrackPromise: Promise<Mp3StreamSource | null> | null =
         firstResolvePromise;
@@ -247,12 +380,7 @@ export async function GET(
           console.error(`[radio] ${code} resolve failed track ${trackId}:`, e);
         }
 
-        // Save the cursor BEFORE piping, so even if the host process is
-        // killed mid-track, on reconnect we advance to the NEXT track
-        // (resume-forward semantics).
-        setListenerCursor(lkey, trackIndex % trackIds.length);
-
-        // Pre-resolve the following track in the background.
+        // Pre-resolve the next track in the background.
         const nextIdx = (trackIndex + 1) % trackIds.length;
         nextTrackPromise = sc
           .resolveMp3Stream(trackIds[nextIdx])
@@ -260,8 +388,6 @@ export async function GET(
             console.error(`[radio] prefetch track ${trackIds[nextIdx]}:`, e);
             return null;
           });
-
-        trackIndex++;
 
         if (!mp3) {
           consecutiveFailures++;
@@ -276,15 +402,40 @@ export async function GET(
             } catch {}
             return;
           }
+          // Skip the bad track AND realign to wall-clock — even unplayable
+          // tracks consume their slot in the loop, and resolving may have
+          // taken non-trivial wall-clock time.
+          const fix = computeTimelinePosition(epochMs, Date.now(), durationsMs);
+          trackIndex = fix.trackIndex;
+          initialOffsetMs = fix.offsetMs;
           continue;
         }
         consecutiveFailures = 0;
 
+        // Reset pacer at each track boundary, accounting for our mid-track offset.
+        // This is what keeps a late joiner aligned: the pacer pretends it
+        // started `initialOffsetMs` ago so it doesn't try to deliver the
+        // "missed" portion in a burst.
+        pacer.reset(0, initialOffsetMs);
+
         try {
           if (mp3.type === 'progressive') {
-            await pipeProgressive(mp3.url, controller, abortController.signal);
+            await pipeProgressivePaced(
+              mp3.url,
+              controller,
+              abortController.signal,
+              pacer,
+              initialOffsetMs,
+              durationsMs[trackIndex % durationsMs.length] || 0
+            );
           } else {
-            await pipeHlsParallel(mp3.url, controller, abortController.signal);
+            await pipeHlsParallelPaced(
+              mp3.url,
+              controller,
+              abortController.signal,
+              pacer,
+              initialOffsetMs
+            );
           }
         } catch (e: any) {
           if (
@@ -299,6 +450,11 @@ export async function GET(
             e?.message || e
           );
         }
+
+        // After the first (mid-track) song completes, all subsequent songs
+        // play from the start.
+        initialOffsetMs = 0;
+        trackIndex++;
       }
 
       try {
@@ -319,7 +475,7 @@ export async function GET(
       'icy-name': safeName,
       'icy-genre': 'Various',
       'icy-description': `EgMax radio · ${safeName}`,
-      'icy-br': '128',
+      'icy-br': String(ASSUMED_BITRATE_KBPS),
     },
   });
 }
@@ -333,7 +489,7 @@ export async function HEAD(
     headers: {
       ...RADIO_HEADERS,
       'icy-name': 'EgMax Radio',
-      'icy-br': '128',
+      'icy-br': String(ASSUMED_BITRATE_KBPS),
     },
   });
 }
@@ -349,19 +505,94 @@ export async function OPTIONS() {
   });
 }
 
-/* ─────────────── pipe helpers ─────────────── */
+/* ─────────────── progressive piping (with mid-track join + pacing) ─────────────── */
 
-async function pipeProgressive(
+/**
+ * Pipe a progressive MP3 through the pacer, optionally starting `offsetMs`
+ * into the track via an HTTP Range request.
+ *
+ * Bitrate strategy:
+ *   - We do a HEAD (cheap) to get Content-Length.
+ *   - If we have it AND track duration, real bitrate = bytes ÷ seconds. We
+ *     update the pacer rate so output paces match the actual track, not
+ *     our 128kbps assumption.
+ *   - If we don't, fall back to ASSUMED_BYTES_PER_SEC.
+ *   - Byte offset for mid-track join = bitrate × offset_seconds. VBR may
+ *     drift but is fine for room radio.
+ */
+async function pipeProgressivePaced(
   url: string,
   controller: ReadableStreamDefaultController<Uint8Array>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  pacer: BytePacer,
+  offsetMs: number,
+  trackDurationMs: number
 ): Promise<void> {
-  const res = await fetch(url, { headers: SC_FETCH_HEADERS, signal });
+  let bytesPerSec = ASSUMED_BYTES_PER_SEC;
+  let totalBytes = 0;
+
+  // Probe Content-Length (HEAD is cheap; SoundCloud CDN supports it).
+  try {
+    const head = await fetch(url, { method: 'HEAD', headers: SC_FETCH_HEADERS, signal });
+    const cl = head.headers.get('content-length');
+    if (cl) {
+      const n = parseInt(cl, 10);
+      if (n > 0) {
+        totalBytes = n;
+        if (trackDurationMs > 0) {
+          bytesPerSec = (n * 1000) / trackDurationMs;
+          pacer.setRate(bytesPerSec);
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — fall through with assumed rate.
+  }
+
+  // Compute byte offset for mid-track join. Clamp to [0, totalBytes-1].
+  let byteOffset = 0;
+  if (offsetMs > 0) {
+    byteOffset = Math.floor((offsetMs / 1000) * bytesPerSec);
+    if (totalBytes > 0 && byteOffset >= totalBytes) {
+      // Offset overshoots the file — already past the end. Skip the track.
+      return;
+    }
+  }
+
+  const reqHeaders: Record<string, string> = { ...SC_FETCH_HEADERS };
+  if (byteOffset > 0) {
+    reqHeaders['Range'] = `bytes=${byteOffset}-`;
+  }
+
+  const res = await fetch(url, { headers: reqHeaders, signal });
   if (!res.ok || !res.body) {
+    // 416 (Range Not Satisfiable) or similar — try without Range as fallback.
+    if (byteOffset > 0 && (res.status === 416 || res.status === 400)) {
+      const fallback = await fetch(url, { headers: SC_FETCH_HEADERS, signal });
+      if (!fallback.ok || !fallback.body) {
+        throw new Error(`progressive fetch ${fallback.status}`);
+      }
+      // No range — but we still need to honor the wall-clock offset, so the
+      // pacer (already reset with offsetMs) will throttle from byte 0 as if
+      // the track started offsetMs ago. That keeps wall-clock alignment but
+      // causes the listener to hear extra audio at the start. Mid-track join
+      // is best-effort when Range isn't supported.
+      await drainBodyPaced(fallback.body, controller, signal, pacer);
+      return;
+    }
     throw new Error(`progressive fetch ${res.status}`);
   }
 
-  const reader = res.body.getReader();
+  await drainBodyPaced(res.body, controller, signal, pacer);
+}
+
+async function drainBodyPaced(
+  body: ReadableStream<Uint8Array>,
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  signal: AbortSignal,
+  pacer: BytePacer
+): Promise<void> {
+  const reader = body.getReader();
   while (true) {
     if (signal.aborted) {
       try { await reader.cancel(); } catch {}
@@ -370,6 +601,12 @@ async function pipeProgressive(
     const { done, value } = await reader.read();
     if (done) break;
     if (value && value.byteLength > 0) {
+      // Pace BEFORE enqueue so we never burst ahead of wall-clock.
+      await pacer.account(value.byteLength, signal);
+      if (signal.aborted) {
+        try { await reader.cancel(); } catch {}
+        return;
+      }
       try {
         controller.enqueue(value);
       } catch {
@@ -380,19 +617,48 @@ async function pipeProgressive(
   }
 }
 
-async function pipeHlsParallel(
+/* ─────────────── HLS piping (segment-level mid-track join + pacing) ─────────────── */
+
+interface HlsSegment {
+  url: string;
+  durationSec: number;
+}
+
+async function pipeHlsParallelPaced(
   manifestUrl: string,
   controller: ReadableStreamDefaultController<Uint8Array>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  pacer: BytePacer,
+  offsetMs: number
 ): Promise<void> {
   const manifestRes = await fetch(manifestUrl, { headers: SC_FETCH_HEADERS, signal });
   if (!manifestRes.ok) {
     throw new Error(`hls manifest fetch ${manifestRes.status}`);
   }
   const manifestText = await manifestRes.text();
-  const segmentUrls = parseM3u8Segments(manifestText, manifestUrl);
-  if (segmentUrls.length === 0) {
+  const segments = parseM3u8SegmentsWithDurations(manifestText, manifestUrl);
+  if (segments.length === 0) {
     throw new Error('hls manifest: no segments');
+  }
+
+  // Find the segment that contains offsetMs (segment-level granularity).
+  let startSegIdx = 0;
+  if (offsetMs > 0) {
+    let acc = 0;
+    let found = false;
+    for (let i = 0; i < segments.length; i++) {
+      const segMs = segments[i].durationSec * 1000;
+      if (acc + segMs > offsetMs) {
+        startSegIdx = i;
+        found = true;
+        break;
+      }
+      acc += segMs;
+    }
+    if (!found) {
+      // Offset past the track — skip.
+      return;
+    }
   }
 
   const fetchSegment = async (segUrl: string): Promise<Uint8Array | null> => {
@@ -407,21 +673,39 @@ async function pipeHlsParallel(
     }
   };
 
+  const remaining = segments.slice(startSegIdx);
+
   const queue: Array<Promise<Uint8Array | null>> = [];
-  for (let i = 0; i < Math.min(HLS_PREFETCH, segmentUrls.length); i++) {
-    queue.push(fetchSegment(segmentUrls[i]));
+  for (let i = 0; i < Math.min(HLS_PREFETCH, remaining.length); i++) {
+    queue.push(fetchSegment(remaining[i].url));
   }
   let nextToFetch = queue.length;
 
-  for (let played = 0; played < segmentUrls.length; played++) {
+  for (let played = 0; played < remaining.length; played++) {
     if (signal.aborted) return;
 
     const buf = await queue.shift()!;
-    if (nextToFetch < segmentUrls.length) {
-      queue.push(fetchSegment(segmentUrls[nextToFetch++]));
+    if (nextToFetch < remaining.length) {
+      queue.push(fetchSegment(remaining[nextToFetch++].url));
     }
 
     if (!buf || buf.byteLength === 0) continue;
+
+    // Refine pacer rate on the first real segment we receive: bytes per
+    // second of audio = segment_bytes ÷ segment_duration_sec. Handles
+    // tracks at non-128k bitrates.
+    if (played === 0 && remaining[0].durationSec > 0) {
+      const inferred = buf.byteLength / remaining[0].durationSec;
+      if (isFinite(inferred) && inferred > 1000) {
+        pacer.setRate(inferred);
+      }
+    }
+
+    await pacer.account(buf.byteLength, signal);
+    if (signal.aborted) {
+      await Promise.allSettled(queue);
+      return;
+    }
 
     try {
       controller.enqueue(buf);
@@ -432,17 +716,32 @@ async function pipeHlsParallel(
   }
 }
 
-function parseM3u8Segments(text: string, baseUrl: string): string[] {
-  const out: string[] = [];
+function parseM3u8SegmentsWithDurations(
+  text: string,
+  baseUrl: string
+): HlsSegment[] {
+  const out: HlsSegment[] = [];
   const lines = text.split(/\r?\n/);
+  let pendingDuration = 0;
   for (const raw of lines) {
     const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
+    if (!line) continue;
+    if (line.startsWith('#EXTINF:')) {
+      // #EXTINF:6.000,
+      const m = line.match(/^#EXTINF:([\d.]+)/);
+      pendingDuration = m ? parseFloat(m[1]) : 0;
+      continue;
+    }
+    if (line.startsWith('#')) continue;
     try {
-      out.push(new URL(line, baseUrl).toString());
+      out.push({
+        url: new URL(line, baseUrl).toString(),
+        durationSec: pendingDuration,
+      });
     } catch {
       // ignore
     }
+    pendingDuration = 0;
   }
   return out;
 }
