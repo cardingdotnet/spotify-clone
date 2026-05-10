@@ -25,12 +25,32 @@ Music Source                  → SoundCloud V2 API
 Radio Stream Endpoint         → Long-lived Node response (audio/mpeg)
 ```
 
-> ⚠️ **Hosting note for the radio endpoint**: Vercel's Hobby plan caps function
-> duration at ~10s, and Pro at 60s/300s depending on tier. Because the
-> `/radio/:code` endpoint streams continuously, in production you should host
-> the app on a platform that supports long-lived HTTP responses — Fly.io,
-> Railway, Render, a VPS, or Vercel Pro/Enterprise with Edge Runtime adapted.
-> The `.m3u` endpoint works on any tier because it returns instantly.
+> ⚠️ **Hosting note for the radio endpoint — important for IMVU listeners**
+>
+> The radio endpoint streams continuously, but Vercel Serverless functions
+> have a hard execution-time cap: **10 seconds on Hobby**, 60s on Pro,
+> 300s on Pro with extended duration. When the cap is hit Vercel kills the
+> response and IMVU's player auto-reconnects to the same URL.
+>
+> The endpoint includes **reconnect-resume**: each listener's last position
+> is remembered in-process for 10 minutes, so on reconnect they continue
+> from the next track instead of restarting at track 1. This makes Vercel
+> usable, but the listener will still hear a brief gap every N seconds.
+>
+> For a truly seamless infinite stream — what you want for an IMVU room —
+> deploy to a host that supports long-lived HTTP responses:
+>
+> | Host        | Tier            | Streaming behavior                |
+> | ----------- | --------------- | --------------------------------- |
+> | Fly.io      | Free / Hobby    | ✅ Unlimited duration             |
+> | Railway     | Hobby ($5/mo)   | ✅ Unlimited duration             |
+> | Render      | Free / Starter  | ✅ Unlimited duration             |
+> | VPS (any)   | DigitalOcean +  | ✅ Unlimited duration             |
+> | Vercel      | Hobby           | ⚠️ 10s cap → reconnect every 10s  |
+> | Vercel Pro  | Pro             | ⚠️ 60–300s cap → periodic gap     |
+>
+> The non-radio routes (`/stream/{code}.m3u`, search, library, etc.) work
+> fine on any tier because they return instantly.
 
 ## 🚀 Setup
 

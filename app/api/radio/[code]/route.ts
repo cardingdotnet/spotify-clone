@@ -1,21 +1,34 @@
 /**
- * IMVU-Compatible Radio Endpoint  (FAST PATH)
+ * IMVU-Compatible Radio Endpoint
  *
  * URL: /radio/{code}.mp3
  *
- * Optimizations vs naive version:
- *   1. First track is resolved in parallel with the DB query (lookup happens
- *      while we're still fetching the playlist), shaving 100-300ms off TTFB.
- *   2. The very next track is pre-resolved in the background while the
- *      current one is still streaming → near-zero gap between songs.
- *   3. HLS segments are fetched with a sliding window of N concurrent
- *      requests, so the next segment is buffered while the current one
- *      is being piped → eliminates head-of-line blocking & stutter.
- *   4. The SoundCloud client caches track metadata + signed URLs in-process,
- *      so re-listens / loops avoid extra round trips entirely.
+ * Emits a continuous Icecast-style MP3 byte stream that IMVU's room radio
+ * accepts. The endpoint:
  *
- * IMVU only accepts MPEG audio (MP3); we emit a continuous Icecast-style MP3
- * byte stream with appropriate icy-* headers.
+ *   1. Resolves the first track in parallel with the DB query (fast TTFB).
+ *   2. Pre-resolves the next track in the background while the current one
+ *      is still piping (zero gap between songs).
+ *   3. Fetches HLS segments with a sliding window of 3 in parallel
+ *      (no head-of-line blocking, no buffer underrun).
+ *   4. Caches track metadata + signed URLs in-process so loops & reconnects
+ *      avoid extra round trips.
+ *   5. **Resumes from the listener's last position on reconnect** so when
+ *      the connection drops (host time-limit, network blip, IMVU keep-alive
+ *      timeout) the listener doesn't restart at track 1.
+ *
+ * IMPORTANT — about restarts on Vercel:
+ *
+ *   Vercel Serverless functions have a hard execution-time cap (10s Hobby,
+ *   60s/300s Pro depending on tier). When the cap is hit, the response is
+ *   killed mid-stream. IMVU's player auto-reconnects to the same URL, and
+ *   without resume support the listener would restart at track 1 every
+ *   N seconds. The reconnect-resume logic below mitigates that by tracking
+ *   each listener's last position so they continue forward, but the only
+ *   true fix is to host this endpoint somewhere that supports long-lived
+ *   responses: Fly.io, Railway, Render, a VPS, or a Cloudflare Worker.
+ *
+ *   See README.md for hosting recommendations.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -24,7 +37,11 @@ import { getSoundCloudClient, Mp3StreamSource } from '@/lib/soundcloud/client';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+
+// NOTE: maxDuration deliberately NOT set. The default on Vercel is the
+// platform tier's max; on long-running hosts (Fly/Railway/VPS) there is no
+// limit. Don't reintroduce this — it caps the stream length artificially.
+// (Was: `export const maxDuration = 300;` — the source of the 5-minute restart bug.)
 
 interface PlaylistRow {
   playlist_id: string;
@@ -46,7 +63,6 @@ const RADIO_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   Connection: 'close',
   'icy-pub': '0',
-  // Disable proxy buffering on common reverse-proxies (nginx, Vercel edge).
   'X-Accel-Buffering': 'no',
 };
 
@@ -61,11 +77,7 @@ const SC_FETCH_HEADERS = {
 /** How many HLS segments to fetch in parallel ahead of the playhead. */
 const HLS_PREFETCH = 3;
 
-/**
- * Tiny per-process cache: short_code -> rows, valid for 30s.
- * Eliminates the Supabase round-trip when an IMVU client reconnects
- * (which happens often during room load/reload) for the same playlist.
- */
+/* ─────────────── Playlist row cache (avoid Supabase round trip on reconnect) ─────────────── */
 const PLAYLIST_TTL_MS = 30 * 1000;
 const playlistCache = new Map<
   string,
@@ -83,13 +95,71 @@ function getCachedPlaylist(code: string): PlaylistRow[] | null {
 }
 
 function setCachedPlaylist(code: string, rows: PlaylistRow[]): void {
-  // Cap the cache so we don't leak memory with random codes
   if (playlistCache.size > 1000) {
     const firstKey = playlistCache.keys().next().value;
     if (firstKey !== undefined) playlistCache.delete(firstKey);
   }
   playlistCache.set(code, { rows, expiresAt: Date.now() + PLAYLIST_TTL_MS });
 }
+
+/* ─────────────── Listener cursor (resume on reconnect) ─────────────── */
+/**
+ * Tracks where each listener was when their connection last closed, so on
+ * reconnect we can resume from the *next* track instead of starting over.
+ *
+ * Key: `${code}:${listener-fingerprint}` — IP-hash + UA hash.
+ * Value: index of the LAST track that was being played + when it was set.
+ *
+ * The cursor expires after CURSOR_TTL_MS to avoid a listener resuming days
+ * later from a stale spot. The same TTL also means an IP rotation eventually
+ * starts fresh from track 0, which is fine.
+ */
+const CURSOR_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const listenerCursor = new Map<string, { idx: number; expiresAt: number }>();
+
+function getListenerCursor(key: string): number | null {
+  const e = listenerCursor.get(key);
+  if (!e) return null;
+  if (Date.now() > e.expiresAt) {
+    listenerCursor.delete(key);
+    return null;
+  }
+  return e.idx;
+}
+
+function setListenerCursor(key: string, idx: number): void {
+  if (listenerCursor.size > 5000) {
+    // Crude eviction
+    const firstKey = listenerCursor.keys().next().value;
+    if (firstKey !== undefined) listenerCursor.delete(firstKey);
+  }
+  listenerCursor.set(key, { idx, expiresAt: Date.now() + CURSOR_TTL_MS });
+}
+
+/** Build a stable listener fingerprint from IP + UA. */
+async function listenerKey(code: string, request: NextRequest): Promise<string> {
+  const ip =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip') ||
+    'unknown';
+  const ua = request.headers.get('user-agent') || 'unknown';
+  // Truncate UA to a coarse fingerprint so minor version bumps don't break resume.
+  const uaCoarse = ua.substring(0, 40);
+  const raw = `${code}|${ip}|${uaCoarse}`;
+  return `${code}:${await sha256(raw)}`;
+}
+
+async function sha256(input: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .substring(0, 24);
+}
+
+/* ─────────────── Main handler ─────────────── */
 
 export async function GET(
   request: NextRequest,
@@ -102,24 +172,21 @@ export async function GET(
     return new NextResponse('Invalid radio URL', { status: 400 });
   }
 
-  // Fast path: cached playlist rows skip the Supabase RPC entirely.
+  // ─── Load playlist (cache first, then Supabase) ───
   let rows = getCachedPlaylist(code);
-
   if (!rows) {
     const supabase = createAdminSupabaseClient();
-    const { data: rawRows, error } = await supabase.rpc('get_playlist_by_short_code', {
-      p_code: code,
-    });
-
+    const { data: rawRows, error } = await supabase.rpc(
+      'get_playlist_by_short_code',
+      { p_code: code }
+    );
     if (error) {
       console.error('[radio] DB error:', error);
       return new NextResponse('Failed to load playlist', { status: 500 });
     }
-
     rows = (rawRows ?? []) as PlaylistRow[];
     if (rows.length > 0) setCachedPlaylist(code, rows);
   }
-
   if (rows.length === 0) {
     return new NextResponse(`Radio not found: ${code}`, { status: 404 });
   }
@@ -128,13 +195,21 @@ export async function GET(
   const playlistId = rows[0].playlist_id;
   const trackIds = rows.map((r) => r.track_id);
 
+  // ─── Resume support ───
+  const lkey = await listenerKey(code, request);
+  const lastIdx = getListenerCursor(lkey);
+  // Start at the NEXT track after the last one played, so we don't replay
+  // a track the listener just heard. (Wrap to 0 if at end.)
+  const startIndex =
+    lastIdx === null ? 0 : (lastIdx + 1) % trackIds.length;
+
   console.log(
-    `[radio] ${code} -> "${playlistName}" (${trackIds.length} tracks). UA="${request.headers
-      .get('user-agent')
-      ?.substring(0, 80)}"`
+    `[radio] ${code} -> "${playlistName}" (${trackIds.length} tracks). ` +
+    `start=${startIndex} ${lastIdx !== null ? '(resume)' : '(fresh)'} ` +
+    `UA="${(request.headers.get('user-agent') || '').substring(0, 60)}"`
   );
 
-  // Fire-and-forget logging — never blocks the stream
+  // Fire-and-forget logging (never blocks the stream)
   logRadioAccess(code, request).catch((e) =>
     console.error('[radio] log failed:', e)
   );
@@ -145,29 +220,26 @@ export async function GET(
   const sc = getSoundCloudClient();
   const abortController = new AbortController();
 
-  // FAST PATH: kick off the first track resolution NOW, in parallel.
-  // By the time we hit the stream loop, this promise is usually done.
-  const firstResolvePromise = sc.resolveMp3Stream(trackIds[0]);
+  // Pre-warm the first track resolution (parallel with framework header send).
+  const firstResolvePromise = sc.resolveMp3Stream(trackIds[startIndex]);
 
   request.signal.addEventListener('abort', () => {
-    console.log(`[radio] ${code} client disconnected, stopping stream`);
+    console.log(`[radio] ${code} client disconnected`);
     abortController.abort();
   });
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      let trackIndex = 0;
+      let trackIndex = startIndex;
       let consecutiveFailures = 0;
       const MAX_CONSECUTIVE_FAILURES = trackIds.length * 2;
 
-      // Prefetched next-track resolution (warm pipe between songs)
       let nextTrackPromise: Promise<Mp3StreamSource | null> | null =
         firstResolvePromise;
 
       while (!abortController.signal.aborted) {
         const trackId = trackIds[trackIndex % trackIds.length];
 
-        // Use the prefetched promise for THIS track.
         let mp3: Mp3StreamSource | null = null;
         try {
           mp3 = await (nextTrackPromise || sc.resolveMp3Stream(trackId));
@@ -175,8 +247,12 @@ export async function GET(
           console.error(`[radio] ${code} resolve failed track ${trackId}:`, e);
         }
 
-        // Immediately kick off resolution of the *following* track, so by
-        // the time we finish piping this one, the next URL is ready.
+        // Save the cursor BEFORE piping, so even if the host process is
+        // killed mid-track, on reconnect we advance to the NEXT track
+        // (resume-forward semantics).
+        setListenerCursor(lkey, trackIndex % trackIds.length);
+
+        // Pre-resolve the following track in the background.
         const nextIdx = (trackIndex + 1) % trackIds.length;
         nextTrackPromise = sc
           .resolveMp3Stream(trackIds[nextIdx])
@@ -190,12 +266,11 @@ export async function GET(
         if (!mp3) {
           consecutiveFailures++;
           console.warn(
-            `[radio] ${code} skipping track ${trackId} (no MP3). failures=${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}`
+            `[radio] ${code} skip track ${trackId} (no MP3). ` +
+            `failures=${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}`
           );
           if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-            console.error(
-              `[radio] ${code} too many consecutive failures, ending stream`
-            );
+            console.error(`[radio] ${code} too many failures, ending stream`);
             try {
               controller.close();
             } catch {}
@@ -220,10 +295,9 @@ export async function GET(
             return;
           }
           console.error(
-            `[radio] ${code} stream error on track ${trackId}:`,
+            `[radio] ${code} stream error track ${trackId}:`,
             e?.message || e
           );
-          // Move on to next track
         }
       }
 
@@ -244,7 +318,7 @@ export async function GET(
       ...RADIO_HEADERS,
       'icy-name': safeName,
       'icy-genre': 'Various',
-      'icy-description': `Radio stream from EgMax/Spotify-Clone playlist "${safeName}"`,
+      'icy-description': `EgMax radio · ${safeName}`,
       'icy-br': '128',
     },
   });
@@ -254,8 +328,6 @@ export async function HEAD(
   _request: NextRequest,
   _ctx: { params: Promise<{ code: string }> }
 ) {
-  // IMVU/Icecast clients sometimes probe with HEAD first — answer instantly,
-  // no DB lookup needed (the client just wants to confirm the stream is alive).
   return new NextResponse(null, {
     status: 200,
     headers: {
@@ -277,22 +349,14 @@ export async function OPTIONS() {
   });
 }
 
-/* ---------------- pipe helpers ---------------- */
+/* ─────────────── pipe helpers ─────────────── */
 
-/**
- * Stream a progressive MP3 URL straight through to the client.
- * The Node fetch already buffers internally; we just forward chunks.
- */
 async function pipeProgressive(
   url: string,
   controller: ReadableStreamDefaultController<Uint8Array>,
   signal: AbortSignal
 ): Promise<void> {
-  const res = await fetch(url, {
-    headers: SC_FETCH_HEADERS,
-    signal,
-  });
-
+  const res = await fetch(url, { headers: SC_FETCH_HEADERS, signal });
   if (!res.ok || !res.body) {
     throw new Error(`progressive fetch ${res.status}`);
   }
@@ -300,9 +364,7 @@ async function pipeProgressive(
   const reader = res.body.getReader();
   while (true) {
     if (signal.aborted) {
-      try {
-        await reader.cancel();
-      } catch {}
+      try { await reader.cancel(); } catch {}
       return;
     }
     const { done, value } = await reader.read();
@@ -311,52 +373,32 @@ async function pipeProgressive(
       try {
         controller.enqueue(value);
       } catch {
-        try {
-          await reader.cancel();
-        } catch {}
+        try { await reader.cancel(); } catch {}
         return;
       }
     }
   }
 }
 
-/**
- * Parallel HLS pipe: fetches HLS_PREFETCH segments concurrently and pipes
- * them out in order.  The next segment download begins before the current
- * one is even finished playing, so the pipeline stays full and the listener
- * never hits a buffer underrun.
- *
- * SoundCloud's HLS-MP3 segments are raw MPEG-1 Layer 3 frames that
- * concatenate into one valid MP3 byte stream.
- */
 async function pipeHlsParallel(
   manifestUrl: string,
   controller: ReadableStreamDefaultController<Uint8Array>,
   signal: AbortSignal
 ): Promise<void> {
-  const manifestRes = await fetch(manifestUrl, {
-    headers: SC_FETCH_HEADERS,
-    signal,
-  });
+  const manifestRes = await fetch(manifestUrl, { headers: SC_FETCH_HEADERS, signal });
   if (!manifestRes.ok) {
     throw new Error(`hls manifest fetch ${manifestRes.status}`);
   }
   const manifestText = await manifestRes.text();
-
   const segmentUrls = parseM3u8Segments(manifestText, manifestUrl);
   if (segmentUrls.length === 0) {
     throw new Error('hls manifest: no segments');
   }
 
-  // Pre-launch up to HLS_PREFETCH segment downloads in parallel.
-  // Each entry holds a Promise<Uint8Array | null>.
   const fetchSegment = async (segUrl: string): Promise<Uint8Array | null> => {
     if (signal.aborted) return null;
     try {
-      const res = await fetch(segUrl, {
-        headers: SC_FETCH_HEADERS,
-        signal,
-      });
+      const res = await fetch(segUrl, { headers: SC_FETCH_HEADERS, signal });
       if (!res.ok) return null;
       const buf = await res.arrayBuffer();
       return new Uint8Array(buf);
@@ -366,18 +408,15 @@ async function pipeHlsParallel(
   };
 
   const queue: Array<Promise<Uint8Array | null>> = [];
-  // Prime the pipeline
   for (let i = 0; i < Math.min(HLS_PREFETCH, segmentUrls.length); i++) {
     queue.push(fetchSegment(segmentUrls[i]));
   }
   let nextToFetch = queue.length;
 
-  // Drain in order, keeping the queue full until all segments are scheduled.
   for (let played = 0; played < segmentUrls.length; played++) {
     if (signal.aborted) return;
 
     const buf = await queue.shift()!;
-    // Schedule the next download as soon as one slot frees up
     if (nextToFetch < segmentUrls.length) {
       queue.push(fetchSegment(segmentUrls[nextToFetch++]));
     }
@@ -387,16 +426,12 @@ async function pipeHlsParallel(
     try {
       controller.enqueue(buf);
     } catch {
-      // Client disconnected — drain remaining promises silently
       await Promise.allSettled(queue);
       return;
     }
   }
 }
 
-/**
- * Extract segment URIs from an HLS playlist body.
- */
 function parseM3u8Segments(text: string, baseUrl: string): string[] {
   const out: string[] = [];
   const lines = text.split(/\r?\n/);
@@ -428,7 +463,7 @@ async function logRadioAccess(code: string, request: NextRequest) {
       request.headers.get('x-forwarded-for')?.split(',')[0] ||
       request.headers.get('x-real-ip') ||
       'unknown';
-    const ipHash = await hash(ip);
+    const ipHash = await sha256(ip);
     await supabase.from('stream_access_logs').insert({
       stream_token: code,
       user_agent: ('[radio] ' + userAgent).substring(0, 500),
@@ -452,13 +487,4 @@ async function incrementPlayCount(playlistId: string) {
       .update({ play_count: (current.play_count || 0) + 1 })
       .eq('id', playlistId);
   }
-}
-
-async function hash(input: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(input);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
 }
