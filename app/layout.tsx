@@ -18,7 +18,7 @@ const sans = Inter({
 const serif = Fraunces({
   subsets: ['latin'],
   variable: '--font-serif',
-  weight: ['400', '500', '600'],
+  weight: 'variable',
   axes: ['opsz', 'SOFT'],
   display: 'swap',
 });
