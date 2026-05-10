@@ -68,6 +68,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase/server';
 import { getSoundCloudClient, Mp3StreamSource } from '@/lib/soundcloud/client';
+import {
+  applyPlayMode,
+  isPlayMode,
+  PlayMode,
+} from '@/lib/playlist/play-modes';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -86,8 +91,12 @@ interface PlaylistRow {
   track_artist: string;
   track_duration_ms: number;
   track_position: number;
+  /** SoundCloud genre, may be null. Used by play-mode = 'by-genre'. */
+  track_genre: string | null;
   /** ISO timestamp; null if the broadcast hasn't started yet. */
   broadcast_started_at: string | null;
+  /** Owner's chosen ordering for the broadcast. Defaults to 'sequential'. */
+  default_play_mode: string;
 }
 
 const RADIO_HEADERS = {
@@ -299,10 +308,11 @@ export async function GET(
 
   const playlistName = rows[0].playlist_name;
   const playlistId = rows[0].playlist_id;
-  const trackIds = rows.map((r) => r.track_id);
-  const durationsMs = rows.map((r) => r.track_duration_ms || 0);
 
   // ─── Establish or read the broadcast epoch ───
+  // We need the epoch BEFORE we order tracks because the epoch is also the
+  // shuffle seed — every listener must compute the same shuffled order, so
+  // the only safe seed is one that's persisted and identical for everyone.
   let epochIso = rows[0].broadcast_started_at;
   if (!epochIso) {
     // First listener ever — claim the epoch atomically.
@@ -327,12 +337,34 @@ export async function GET(
   }
   const epochMs = epochIso ? Date.parse(epochIso) : Date.now();
 
+  // ─── Apply the playlist's default play mode to derive the track order ───
+  // The mode determines what listeners hear; the epoch is used as the seed
+  // for any randomness, so two listeners on the same broadcast compute the
+  // exact same playlist order without needing to share state.
+  //
+  // If the owner ever changes the mode (via set_default_play_mode), the
+  // epoch is reset to NULL by that RPC, and the next listener to connect
+  // claims a fresh epoch — giving everyone a clean restart in the new order.
+  const rawMode = rows[0].default_play_mode || 'sequential';
+  const mode: PlayMode = isPlayMode(rawMode) ? rawMode : 'sequential';
+
+  const orderable = rows.map((r) => ({
+    id: r.track_id,
+    artist: r.track_artist,
+    genre: r.track_genre,
+    durationMs: r.track_duration_ms,
+    addedAt: r.track_position, // Use position as the "added" proxy since we don't track added_at on the radio
+  }));
+  const ordered = applyPlayMode(orderable, mode, epochMs);
+  const trackIds = ordered.map((o) => o.id);
+  const durationsMs = ordered.map((o) => o.durationMs ?? 0);
+
   // ─── Compute "where on the timeline am I joining?" ───
   const start = computeTimelinePosition(epochMs, Date.now(), durationsMs);
 
   const lkey = await listenerKey(code, request);
   console.log(
-    `[radio] ${code} -> "${playlistName}" (${trackIds.length} tracks). ` +
+    `[radio] ${code} -> "${playlistName}" (${trackIds.length} tracks, mode=${mode}). ` +
     `epoch=${epochIso} join@track=${start.trackIndex} offset=${start.offsetMs}ms ` +
     `lkey=${lkey.substring(0, 12)} ` +
     `UA="${(request.headers.get('user-agent') || '').substring(0, 60)}"`

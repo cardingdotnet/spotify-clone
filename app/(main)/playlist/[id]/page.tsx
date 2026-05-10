@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { 
   Music, Trash2, Copy, Check, Share2, Loader2,
   ExternalLink, Play, Pause, Edit2, MoreHorizontal, Clock,
-  Volume2
+  Volume2, Shuffle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatDuration, getStreamUrl, getStreamUrlWithExtension, getRadioUrl } from '@/lib/utils';
@@ -92,7 +92,15 @@ export default function PlaylistPage() {
 
   function playAll() {
     if (tracks.length === 0) return;
-    playQueue(buildQueue(), 0);
+    playQueue(buildQueue(), 0, 'sequential');
+  }
+
+  function smartShuffleAll() {
+    if (tracks.length === 0) return;
+    // Pick a random start index from the supplied list; playQueue with the
+    // 'smart-shuffle' mode will re-order around it.
+    const startIdx = Math.floor(Math.random() * tracks.length);
+    playQueue(buildQueue(), startIdx, 'smart-shuffle');
   }
 
   function playTrackAt(index: number) {
@@ -340,6 +348,16 @@ export default function PlaylistPage() {
           ) : (
             <Play className="w-5 h-5 sm:w-6 sm:h-6 text-cream-50 ml-0.5" fill="currentColor" />
           )}
+        </button>
+
+        <button
+          onClick={smartShuffleAll}
+          disabled={tracks.length === 0}
+          className="btn-secondary"
+          title="Shuffle, with no two tracks from the same artist back-to-back"
+        >
+          <Shuffle className="w-4 h-4" strokeWidth={1.75} />
+          Smart shuffle
         </button>
 
         <button

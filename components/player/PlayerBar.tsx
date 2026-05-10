@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Volume1,
-  Repeat, Repeat1, Shuffle, Music, Loader2, ChevronDown, Heart
+  Repeat, Repeat1, Music, Loader2, ChevronDown, Heart
 } from 'lucide-react';
 import { usePlayerStore } from '@/lib/player/store';
 import { formatDuration } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import AudioWaves from '@/components/ui/AudioWaves';
+import PlayModeMenu from '@/components/player/PlayModeMenu';
 
 export default function PlayerBar() {
   const {
@@ -19,14 +20,12 @@ export default function PlayerBar() {
     duration,
     volume,
     repeat,
-    shuffle,
     togglePlay,
     next,
     previous,
     seek,
     setVolume,
     toggleRepeat,
-    toggleShuffle,
   } = usePlayerStore();
 
   const [isDragging, setIsDragging] = useState(false);
@@ -82,7 +81,7 @@ export default function PlayerBar() {
         >
           {/* Animated background blob */}
           <div className="absolute top-1/4 -left-1/4 w-96 h-96 bg-purple-500/20 rounded-full blur-3xl animate-float" />
-          <div className="absolute bottom-1/4 -right-1/4 w-96 h-96 bg-spotify-green/20 rounded-full blur-3xl animate-float" style={{ animationDelay: '3s' }} />
+          <div className="absolute bottom-1/4 -right-1/4 w-96 h-96 bg-coral-500/15 rounded-full blur-3xl animate-float" style={{ animationDelay: '3s' }} />
           
           {/* Top bar */}
           <div className="flex items-center justify-between p-4 safe-top relative z-10">
@@ -103,7 +102,7 @@ export default function PlayerBar() {
             {/* Vinyl/Album art */}
             <div className="relative w-full max-w-[320px] aspect-square">
               {/* Glow effect */}
-              <div className="absolute inset-0 bg-spotify-green/20 blur-3xl rounded-full" />
+              <div className="absolute inset-0 bg-coral-500/15 blur-3xl rounded-full" />
               
               <div className={cn(
                 "relative w-full h-full rounded-2xl overflow-hidden shadow-2xl",
@@ -162,15 +161,9 @@ export default function PlayerBar() {
 
             {/* Big controls */}
             <div className="flex items-center justify-around w-full max-w-md no-select">
-              <button
-                onClick={toggleShuffle}
-                className={cn(
-                  'p-2 transition-all',
-                  shuffle ? 'text-spotify-green scale-110' : 'text-white/60 hover:text-white'
-                )}
-              >
-                <Shuffle className="w-5 h-5" />
-              </button>
+              <div className="p-2">
+                <PlayModeMenu placement="top" />
+              </div>
               
               <button onClick={previous} className="text-white p-2 hover:scale-110 transition-transform">
                 <SkipBack className="w-9 h-9" fill="currentColor" />
@@ -198,10 +191,11 @@ export default function PlayerBar() {
                 onClick={toggleRepeat}
                 className={cn(
                   'p-2 transition-all',
-                  repeat !== 'none' ? 'text-spotify-green scale-110' : 'text-white/60 hover:text-white'
+                  repeat !== 'none' ? 'text-cream-50 scale-110' : 'text-cream-300 hover:text-cream-100'
                 )}
+                title={`Repeat: ${repeat}`}
               >
-                {repeat === 'one' ? <Repeat1 className="w-5 h-5" /> : <Repeat className="w-5 h-5" />}
+                {repeat === 'one' ? <Repeat1 className="w-5 h-5" strokeWidth={1.75} /> : <Repeat className="w-5 h-5" strokeWidth={1.75} />}
               </button>
             </div>
 
@@ -228,7 +222,7 @@ export default function PlayerBar() {
       )}>
         {/* Subtle top glow line when playing */}
         {isPlaying && (
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-spotify-green/40 to-transparent" />
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-coral-500/30 to-transparent" />
         )}
 
         {/* MOBILE LAYOUT */}
@@ -348,7 +342,7 @@ export default function PlayerBar() {
               title={liked ? 'Unlike' : 'Like'}
             >
               <Heart 
-                className={cn("w-4 h-4", liked ? "text-spotify-green" : "text-white/40 hover:text-white")} 
+                className={cn("w-4 h-4", liked ? "text-coral-500" : "text-white/40 hover:text-white")} 
                 fill={liked ? "currentColor" : "none"}
               />
             </button>
@@ -357,21 +351,7 @@ export default function PlayerBar() {
           {/* Controls */}
           <div className="flex-1 flex flex-col items-center gap-2 max-w-2xl mx-auto">
             <div className="flex items-center gap-5">
-              <button
-                onClick={toggleShuffle}
-                className={cn(
-                  'transition-all relative',
-                  shuffle 
-                    ? 'text-spotify-green' 
-                    : 'text-white/60 hover:text-white hover:scale-110'
-                )}
-                title={shuffle ? 'Shuffle: On' : 'Shuffle: Off'}
-              >
-                <Shuffle className="w-4 h-4" />
-                {shuffle && (
-                  <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 bg-spotify-green rounded-full" />
-                )}
-              </button>
+              <PlayModeMenu placement="top" />
 
               <button
                 onClick={previous}
@@ -413,18 +393,18 @@ export default function PlayerBar() {
                 className={cn(
                   'transition-all relative',
                   repeat !== 'none' 
-                    ? 'text-spotify-green' 
-                    : 'text-white/60 hover:text-white hover:scale-110'
+                    ? 'text-cream-50' 
+                    : 'text-cream-300 hover:text-cream-100 hover:scale-110'
                 )}
                 title={`Repeat: ${repeat}`}
               >
                 {repeat === 'one' ? (
-                  <Repeat1 className="w-4 h-4" />
+                  <Repeat1 className="w-4 h-4" strokeWidth={1.75} />
                 ) : (
-                  <Repeat className="w-4 h-4" />
+                  <Repeat className="w-4 h-4" strokeWidth={1.75} />
                 )}
                 {repeat !== 'none' && (
-                  <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 bg-spotify-green rounded-full" />
+                  <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 bg-cream-50 rounded-full" />
                 )}
               </button>
             </div>
@@ -458,7 +438,7 @@ export default function PlayerBar() {
           {/* Volume + Now Playing indicator */}
           <div className="w-1/4 flex justify-end items-center gap-3">
             {isPlaying && (
-              <AudioWaves size="md" className="text-spotify-green" />
+              <AudioWaves size="md" className="text-cream-50" />
             )}
             
             <div className="flex items-center gap-2 group">
