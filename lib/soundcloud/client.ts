@@ -3,6 +3,11 @@
  *
  * Uses api-v2.soundcloud.com — same as the SoundCloud website.
  * The old V1 API (api.soundcloud.com) is restricted for public use.
+ *
+ * Performance notes:
+ *   - Track metadata is cached for 5 minutes (stable info: title, transcodings list).
+ *   - Resolved signed CDN URLs are cached for 50s (SoundCloud signs them for ~60s+).
+ *   - All MP3 resolutions can be done in parallel via `resolveMp3StreamsBatch`.
  */
 
 import { Track } from './types';
@@ -44,9 +49,61 @@ export interface Mp3StreamSource {
 function isMp3Transcoding(t: any): boolean {
   const mime = String(t?.format?.mime_type || '').toLowerCase();
   const preset = String(t?.preset || '').toLowerCase();
-  // mp3_0_0, mp3_1_0, mp3_standard, etc. Opus is "opus_0_0", AAC is "aac_..."
   return mime.includes('mpeg') || preset.startsWith('mp3');
 }
+
+/* ------------------ in-process caches ------------------ */
+
+interface CachedEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+/** Lightweight TTL cache, scoped per-process. */
+class TTLCache<T> {
+  private store = new Map<string, CachedEntry<T>>();
+  private ttlMs: number;
+  private maxSize: number;
+
+  constructor(ttlMs: number, maxSize = 500) {
+    this.ttlMs = ttlMs;
+    this.maxSize = maxSize;
+  }
+
+  get(key: string): T | undefined {
+    const e = this.store.get(key);
+    if (!e) return undefined;
+    if (Date.now() > e.expiresAt) {
+      this.store.delete(key);
+      return undefined;
+    }
+    return e.value;
+  }
+
+  set(key: string, value: T): void {
+    if (this.store.size >= this.maxSize) {
+      // Cheap eviction: remove oldest insert
+      const firstKey = this.store.keys().next().value;
+      if (firstKey !== undefined) this.store.delete(firstKey);
+    }
+    this.store.set(key, { value, expiresAt: Date.now() + this.ttlMs });
+  }
+
+  delete(key: string): void {
+    this.store.delete(key);
+  }
+}
+
+// Track metadata is fairly stable — 5 minute cache.
+const trackMetaCache = new TTLCache<any>(5 * 60 * 1000);
+// Picked MP3 transcoding endpoint (stable per track) — 5 minute cache.
+const mp3TranscodingCache = new TTLCache<{ url: string; protocol: 'progressive' | 'hls' }>(5 * 60 * 1000);
+// Final signed CDN URL — only ~50s, since SoundCloud signs them for ~60s+.
+const resolvedUrlCache = new TTLCache<{ url: string; protocol: 'progressive' | 'hls' }>(50 * 1000);
+// In-flight dedup so concurrent requests for the same track don't hit SC twice.
+const inFlight = new Map<string, Promise<Mp3StreamSource | null>>();
+// Search results cache — 60s TTL means popular queries are practically free.
+const searchCache = new TTLCache<Track[]>(60 * 1000, 200);
 
 export class SoundCloudClient {
   private clientId: string;
@@ -59,13 +116,16 @@ export class SoundCloudClient {
   }
 
   /**
-   * Search for tracks
+   * Search for tracks. Cached for 60s per (query, limit, offset) tuple.
    */
   async searchTracks(
     query: string,
     options: { limit?: number; offset?: number } = {}
   ): Promise<Track[]> {
     const { limit = 20, offset = 0 } = options;
+    const cacheKey = `s:${query.trim().toLowerCase()}:${limit}:${offset}`;
+    const cached = searchCache.get(cacheKey);
+    if (cached) return cached;
 
     const params = new URLSearchParams({
       q: query,
@@ -97,10 +157,12 @@ export class SoundCloudClient {
 
       const data = await response.json();
       const tracks = (data.collection || []) as any[];
-
-      return tracks
+      const normalized = tracks
         .filter(t => t.kind === 'track' && t.streamable !== false)
         .map(normalizeV2Track);
+
+      searchCache.set(cacheKey, normalized);
+      return normalized;
     } catch (error) {
       console.error('SoundCloud search error:', error);
       throw error;
@@ -108,9 +170,12 @@ export class SoundCloudClient {
   }
 
   /**
-   * Get track details by ID
+   * Get track details by ID (with cache).
    */
   async getTrack(trackId: number): Promise<Track | null> {
+    const cached = trackMetaCache.get(`meta:${trackId}`);
+    if (cached) return normalizeV2Track(cached);
+
     const params = new URLSearchParams({
       client_id: this.clientId,
     });
@@ -129,6 +194,7 @@ export class SoundCloudClient {
       }
 
       const track = await response.json();
+      trackMetaCache.set(`meta:${trackId}`, track);
       return normalizeV2Track(track);
     } catch (error) {
       console.error(`Failed to fetch track ${trackId}:`, error);
@@ -137,31 +203,36 @@ export class SoundCloudClient {
   }
 
   /**
+   * Internal: get raw track metadata with cache.
+   */
+  private async getTrackRaw(trackId: number): Promise<any | null> {
+    const key = `meta:${trackId}`;
+    const cached = trackMetaCache.get(key);
+    if (cached) return cached;
+
+    const params = new URLSearchParams({ client_id: this.clientId });
+    const res = await fetch(
+      `${SOUNDCLOUD_API_V2}/tracks/${trackId}?${params}`,
+      { headers: DEFAULT_HEADERS, cache: 'no-store' }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    trackMetaCache.set(key, data);
+    return data;
+  }
+
+  /**
    * Resolve stream URL with type info.
-   *
-   * @param trackId - SoundCloud track ID
-   * @param preferProgressive - If true, only use progressive (MP3). Better for M3U/external players.
-   *                           If false, prefer HLS (better quality, used by web player).
    */
   async resolveStreamUrlWithType(
     trackId: number,
     preferProgressive: boolean = false
   ): Promise<StreamResult | null> {
     try {
-      const params = new URLSearchParams({ client_id: this.clientId });
-      const trackResponse = await fetch(
-        `${SOUNDCLOUD_API_V2}/tracks/${trackId}?${params}`,
-        { headers: DEFAULT_HEADERS, cache: 'no-store' }
-      );
+      const track = await this.getTrackRaw(trackId);
+      if (!track) return null;
 
-      if (!trackResponse.ok) {
-        console.error(`Track fetch failed: ${trackResponse.status}`);
-        return null;
-      }
-
-      const track = await trackResponse.json();
       const transcodings = track.media?.transcodings || [];
-
       if (transcodings.length === 0) {
         console.error(`No transcodings for track ${trackId}`);
         return null;
@@ -224,54 +295,77 @@ export class SoundCloudClient {
 
   /**
    * Resolve a track to its MP3 stream specifically — required for IMVU radio.
-   * IMVU only accepts MPEG audio (MP3); Opus/AAC will not play.
    *
-   * Returns null if the track has no MP3 transcoding available.
+   * Fast path: if we have a cached signed URL, return it instantly (zero
+   * network calls). Otherwise fetch the metadata (cached up to 5 min)
+   * then resolve the transcoding (only this part is uncacheable since
+   * SoundCloud signs the URL with a short-lived token).
    */
   async resolveMp3Stream(trackId: number): Promise<Mp3StreamSource | null> {
+    // 1) Hot cache: cached signed URL still valid → return immediately.
+    const hot = resolvedUrlCache.get(`url:${trackId}`);
+    if (hot) {
+      return {
+        trackId,
+        url: hot.url,
+        type: hot.protocol,
+        mimeType: 'audio/mpeg',
+      };
+    }
+
+    // 2) Dedup concurrent in-flight requests for the same track.
+    const flightKey = `flight:${trackId}`;
+    const inflight = inFlight.get(flightKey);
+    if (inflight) return inflight;
+
+    const promise = this._resolveMp3StreamInner(trackId);
+    inFlight.set(flightKey, promise);
     try {
-      const params = new URLSearchParams({ client_id: this.clientId });
-      const trackResponse = await fetch(
-        `${SOUNDCLOUD_API_V2}/tracks/${trackId}?${params}`,
-        { headers: DEFAULT_HEADERS, cache: 'no-store' }
-      );
+      return await promise;
+    } finally {
+      inFlight.delete(flightKey);
+    }
+  }
 
-      if (!trackResponse.ok) {
-        console.error(`[mp3] Track fetch failed for ${trackId}: ${trackResponse.status}`);
-        return null;
+  private async _resolveMp3StreamInner(trackId: number): Promise<Mp3StreamSource | null> {
+    try {
+      // 3) Warm cache: cached transcoding pick → only need the resolve call.
+      let pick = mp3TranscodingCache.get(`pick:${trackId}`);
+      if (!pick) {
+        const track = await this.getTrackRaw(trackId);
+        if (!track) return null;
+
+        const transcodings: any[] = track.media?.transcodings || [];
+        if (transcodings.length === 0) {
+          console.error(`[mp3] No transcodings for track ${trackId}`);
+          return null;
+        }
+        const full = transcodings.filter((t) => !t.snipped);
+        const pool = full.length > 0 ? full : transcodings;
+
+        const mp3 = pool.filter(isMp3Transcoding);
+        if (mp3.length === 0) {
+          console.error(
+            `[mp3] Track ${trackId} has no MP3 transcoding ` +
+            `(available: ${pool.map((t) => t.preset).join(', ')})`
+          );
+          return null;
+        }
+
+        const chosen =
+          mp3.find((t) => t.format?.protocol === 'progressive') ||
+          mp3.find((t) => t.format?.protocol === 'hls') ||
+          mp3[0];
+
+        const protocol: 'progressive' | 'hls' =
+          chosen.format?.protocol === 'hls' ? 'hls' : 'progressive';
+
+        pick = { url: chosen.url, protocol };
+        mp3TranscodingCache.set(`pick:${trackId}`, pick);
       }
 
-      const track = await trackResponse.json();
-      const transcodings: any[] = track.media?.transcodings || [];
-
-      if (transcodings.length === 0) {
-        console.error(`[mp3] No transcodings for track ${trackId}`);
-        return null;
-      }
-
-      const full = transcodings.filter((t) => !t.snipped);
-      const pool = full.length > 0 ? full : transcodings;
-
-      // MP3 only — IMVU requirement.
-      const mp3 = pool.filter(isMp3Transcoding);
-      if (mp3.length === 0) {
-        console.error(
-          `[mp3] Track ${trackId} has no MP3 transcoding ` +
-          `(available: ${pool.map((t) => t.preset).join(', ')})`
-        );
-        return null;
-      }
-
-      // Prefer progressive MP3 (single file), fall back to HLS-MP3 (segmented).
-      const chosen =
-        mp3.find((t) => t.format?.protocol === 'progressive') ||
-        mp3.find((t) => t.format?.protocol === 'hls') ||
-        mp3[0];
-
-      const protocol: 'progressive' | 'hls' =
-        chosen.format?.protocol === 'hls' ? 'hls' : 'progressive';
-
-      const transcodingUrl = `${chosen.url}?client_id=${this.clientId}`;
+      // 4) Resolve the signed CDN URL (always fresh — short TTL).
+      const transcodingUrl = `${pick.url}?client_id=${this.clientId}`;
       const resolveResponse = await fetch(transcodingUrl, {
         headers: DEFAULT_HEADERS,
         cache: 'no-store',
@@ -281,22 +375,37 @@ export class SoundCloudClient {
         console.error(
           `[mp3] Transcoding resolve failed for track ${trackId}: ${resolveResponse.status}`
         );
+        // Invalidate transcoding cache: the chosen transcoding URL might be stale.
+        mp3TranscodingCache.delete(`pick:${trackId}`);
         return null;
       }
 
       const data = await resolveResponse.json();
       if (!data.url) return null;
 
+      // Cache the signed URL for ~50s
+      resolvedUrlCache.set(`url:${trackId}`, { url: data.url, protocol: pick.protocol });
+
       return {
         trackId,
         url: data.url,
-        type: protocol,
+        type: pick.protocol,
         mimeType: 'audio/mpeg',
       };
     } catch (error) {
       console.error(`[mp3] Failed to resolve track ${trackId}:`, error);
       return null;
     }
+  }
+
+  /**
+   * Resolve many tracks in parallel — used by the radio endpoint to
+   * pre-warm the entire playlist before the first byte goes out.
+   */
+  async resolveMp3StreamsBatch(
+    trackIds: number[]
+  ): Promise<Array<Mp3StreamSource | null>> {
+    return Promise.all(trackIds.map((id) => this.resolveMp3Stream(id)));
   }
 
   /**

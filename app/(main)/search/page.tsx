@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search as SearchIcon, Plus, Loader2, Music, Play, Pause, X, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatDuration } from '@/lib/utils';
@@ -36,9 +36,10 @@ export default function SearchPage() {
       return;
     }
 
+    // PERF: 250ms feels snappy without thrashing the SC API.
     const timeoutId = setTimeout(() => {
       performSearch(query);
-    }, 400);
+    }, 250);
 
     return () => clearTimeout(timeoutId);
   }, [query]);
@@ -50,22 +51,54 @@ export default function SearchPage() {
       .catch(console.error);
   }, []);
 
+  // Tiny in-component cache keyed by query → results.
+  // Avoids re-hitting the API when the user types, deletes, then retypes.
+  const searchCacheRef = useRef(new Map<string, Track[]>());
+  // Abort controller for the in-flight search so older queries don't
+  // overwrite newer results out of order.
+  const inFlightRef = useRef<AbortController | null>(null);
+
   const performSearch = useCallback(async (q: string) => {
+    const cached = searchCacheRef.current.get(q.trim().toLowerCase());
+    if (cached) {
+      setResults(cached);
+      return;
+    }
+
+    // Cancel previous request — old results landing late would clobber newer.
+    if (inFlightRef.current) {
+      inFlightRef.current.abort();
+    }
+    const ctrl = new AbortController();
+    inFlightRef.current = ctrl;
+
     setLoading(true);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
+        signal: ctrl.signal,
+      });
       const data = await res.json();
-      
+
       if (!res.ok) {
         toast.error(data.error || 'Search failed');
         return;
       }
-      
+
+      // Cache up to 30 query results (LRU-ish).
+      const cache = searchCacheRef.current;
+      if (cache.size >= 30) {
+        const firstKey = cache.keys().next().value;
+        if (firstKey !== undefined) cache.delete(firstKey);
+      }
+      cache.set(q.trim().toLowerCase(), data.tracks);
+
       setResults(data.tracks);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return; // Superseded by newer query
       toast.error('Network error');
     } finally {
-      setLoading(false);
+      // Only clear loading if this is still the latest request.
+      if (inFlightRef.current === ctrl) setLoading(false);
     }
   }, []);
 

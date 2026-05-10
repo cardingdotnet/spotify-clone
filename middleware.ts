@@ -9,14 +9,11 @@ export const config = {
   matcher: [
     /*
      * Skip auth check on:
-     * - Next.js internals
-     * - Static assets
-     * - /stream/* (public M3U playlist URLs — no auth needed)
-     * - /api/stream/* (M3U playlist generator)
-     * - /api/stream-resolve/* (track URL resolver)
-     * - /radio/* (public Icecast MP3 stream URLs — IMVU)
-     * - /api/radio/* (radio stream backend)
+     * - Next.js internals (_next/static, _next/image, _next/data)
+     * - Static assets (favicon, fonts, images, manifest)
+     * - Public stream/radio endpoints (no auth needed)
+     * - API auth routes (handle their own auth)
      */
-    '/((?!_next/static|_next/image|favicon\\.ico|stream/|api/stream/|api/stream-resolve/|radio/|api/radio/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/|favicon\\.ico|robots\\.txt|sitemap\\.xml|manifest\\.json|stream/|api/stream/|api/stream-resolve/|radio/|api/radio/|api/auth/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff|woff2|ttf|css|js|map)$).*)',
   ],
 };

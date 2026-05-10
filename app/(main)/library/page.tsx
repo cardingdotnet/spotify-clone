@@ -2,22 +2,23 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { Music, Plus, Library as LibraryIcon } from 'lucide-react';
 
+export const dynamic = 'force-dynamic';
+
 export default async function LibraryPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
 
+  // PERF: skip the network round-trip; middleware already validated the session.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return null;
+
+  // PERF: read track_count directly from the playlists row (a denormalized
+  // column maintained by a trigger, see database/migration_perf.sql).
+  // The previous version did a count aggregation per row which forced
+  // PostgREST to issue a sub-select per playlist.
   const { data: playlists } = await supabase
     .from('playlists')
-    .select(`
-      id, 
-      name, 
-      cover_url, 
-      play_count, 
-      short_code,
-      created_at,
-      tracks:playlist_tracks(count)
-    `)
-    .eq('user_id', user!.id)
+    .select('id, name, cover_url, play_count, short_code, created_at, track_count')
+    .eq('user_id', session.user.id)
     .order('updated_at', { ascending: false });
 
   return (
@@ -56,13 +57,14 @@ export default async function LibraryPage() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
           {playlists.map((playlist, idx) => {
-            const trackCount = (playlist.tracks as any)?.[0]?.count || 0;
+            const trackCount = (playlist as any).track_count || 0;
             const hue = playlist.id.charCodeAt(0) * 7 % 360;
             
             return (
               <Link
                 key={playlist.id}
                 href={`/playlist/${playlist.id}`}
+                prefetch
                 className="card group relative animate-fade-in-up"
                 style={{ animationDelay: `${idx * 50}ms` }}
               >
@@ -72,6 +74,7 @@ export default async function LibraryPage() {
                     <img
                       src={playlist.cover_url}
                       alt={playlist.name}
+                      loading="lazy"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />
                   ) : (

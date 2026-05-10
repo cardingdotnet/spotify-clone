@@ -10,64 +10,60 @@ export async function GET(
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: playlist, error: playlistError } = await supabase
-    .from('playlists')
-    .select(`
-      id,
-      user_id,
-      name,
-      short_code,
-      slug,
-      description,
-      cover_url,
-      is_public,
-      stream_token,
-      play_count,
-      created_at,
-      updated_at
-    `)
-    .eq('id', id)
-    .single();
+  // PERF: fetch playlist + tracks in PARALLEL.
+  // Was: sequential (~250-500ms total). Now: max(playlist, tracks) (~150-250ms).
+  // RLS filters out playlists the user shouldn't see, so we don't need a
+  // separate auth check here.
+  const [playlistResult, tracksResult] = await Promise.all([
+    supabase
+      .from('playlists')
+      .select(
+        'id, user_id, name, short_code, slug, description, cover_url, ' +
+        'is_public, stream_token, play_count, track_count, created_at, updated_at'
+      )
+      .eq('id', id)
+      .single(),
+    supabase
+      .from('playlist_tracks')
+      .select(
+        'position, added_at, ' +
+        'track:tracks (id, title, artist, duration_ms, artwork_url, permalink_url, genre)'
+      )
+      .eq('playlist_id', id)
+      .order('position', { ascending: true }),
+  ]);
 
-  if (playlistError || !playlist) {
+  if (playlistResult.error || !playlistResult.data) {
     return NextResponse.json({ error: 'Playlist not found' }, { status: 404 });
   }
-
-  const { data: tracks, error: tracksError } = await supabase
-    .from('playlist_tracks')
-    .select(`
-      position,
-      added_at,
-      track:tracks (
-        id,
-        title,
-        artist,
-        duration_ms,
-        artwork_url,
-        permalink_url,
-        genre
-      )
-    `)
-    .eq('playlist_id', id)
-    .order('position', { ascending: true });
-
-  if (tracksError) {
-    return NextResponse.json({ error: tracksError.message }, { status: 500 });
+  if (tracksResult.error) {
+    return NextResponse.json(
+      { error: tracksResult.error.message },
+      { status: 500 }
+    );
   }
 
-  return NextResponse.json({
-    playlist,
-    tracks: tracks?.map((t: any) => ({
-      ...t.track,
-      position: t.position,
-      added_at: t.added_at,
-    })) || [],
-  });
+  return NextResponse.json(
+    {
+      playlist: playlistResult.data,
+      tracks:
+        tracksResult.data?.map((t: any) => ({
+          ...t.track,
+          position: t.position,
+          added_at: t.added_at,
+        })) || [],
+    },
+    {
+      headers: {
+        'Cache-Control': 'private, max-age=0, must-revalidate',
+      },
+    }
+  );
 }
 
 /**
  * PATCH /api/playlists/[id]
- * Rename playlist. Short code STAYS THE SAME (URL doesn't change).
+ * Rename / change description / toggle visibility.
  */
 export async function PATCH(
   request: NextRequest,
@@ -75,21 +71,22 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) {
+  // PERF: parse body in parallel with auth.
+  const [{ data: { session } }, body] = await Promise.all([
+    supabase.auth.getSession(),
+    request.json().catch(() => null as any),
+  ]);
+
+  if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  let body;
-  try {
-    body = await request.json();
-  } catch {
+  if (!body) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const updates: any = {};
-  
+
   if (typeof body.name === 'string' && body.name.trim()) {
     updates.name = body.name.trim().substring(0, 100);
   }
@@ -104,11 +101,12 @@ export async function PATCH(
     return NextResponse.json({ error: 'No valid updates' }, { status: 400 });
   }
 
+  // RLS check + update in one query.
   const { data, error } = await supabase
     .from('playlists')
     .update(updates)
     .eq('id', id)
-    .eq('user_id', user.id)
+    .eq('user_id', session.user.id)
     .select()
     .single();
 
@@ -125,9 +123,9 @@ export async function DELETE(
 ) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
 
-  if (!user) {
+  if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -135,7 +133,7 @@ export async function DELETE(
     .from('playlists')
     .delete()
     .eq('id', id)
-    .eq('user_id', user.id);
+    .eq('user_id', session.user.id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

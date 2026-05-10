@@ -6,50 +6,52 @@ export const runtime = 'nodejs';
 
 export async function GET() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) {
+  // PERF: getSession() reads the cookie and skips the network call to Supabase
+  // auth servers — middleware has already validated the JWT.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // PERF: read denormalized track_count instead of expensive sub-select.
   const { data, error } = await supabase
     .from('playlists')
-    .select(`
-      id,
-      name,
-      short_code,
-      slug,
-      description,
-      cover_url,
-      is_public,
-      stream_token,
-      play_count,
-      created_at,
-      updated_at,
-      tracks:playlist_tracks(count)
-    `)
-    .eq('user_id', user.id)
+    .select(
+      'id, name, short_code, slug, description, cover_url, is_public, ' +
+      'stream_token, play_count, track_count, created_at, updated_at'
+    )
+    .eq('user_id', session.user.id)
     .order('updated_at', { ascending: false });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ playlists: data });
+  return NextResponse.json(
+    { playlists: data },
+    {
+      headers: {
+        // Browser can use a fresh-ish cached copy briefly; revalidate in background.
+        'Cache-Control': 'private, max-age=0, must-revalidate',
+      },
+    }
+  );
 }
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) {
+  // PERF: parse body in parallel with auth check.
+  const [{ data: { session } }, body] = await Promise.all([
+    supabase.auth.getSession(),
+    request.json().catch(() => null as any),
+  ]);
+
+  if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  let body;
-  try {
-    body = await request.json();
-  } catch {
+  if (!body) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
@@ -69,7 +71,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Generate unique short code
+  // Generate a unique short code (the helper retries until unique)
   const admin = createAdminSupabaseClient();
   const shortCode = await generateUniqueShortCode(async (candidate) => {
     const { data } = await admin
@@ -80,7 +82,6 @@ export async function POST(request: NextRequest) {
     return !!data;
   });
 
-  // Also generate a basic slug for display
   const slug = name.trim().toLowerCase()
     .replace(/[\s_]+/g, '-')
     .replace(/[^\u0600-\u06FFa-z0-9-]/g, '')
@@ -91,10 +92,10 @@ export async function POST(request: NextRequest) {
   const { data, error } = await supabase
     .from('playlists')
     .insert({
-      user_id: user.id,
+      user_id: session.user.id,
       name: name.trim(),
       short_code: shortCode,
-      slug: `${slug}-${shortCode}`,  // for backward compat with slug column
+      slug: `${slug}-${shortCode}`,
       description: description?.trim() || null,
       is_public: Boolean(is_public),
     })

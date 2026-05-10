@@ -29,7 +29,10 @@ export async function GET(
   const debug = searchParams.get('debug') === '1';
   const wantJson = format === 'json';
 
-  console.log(`[stream-resolve] Resolving track ${trackId} (json=${wantJson}, debug=${debug})`);
+  // Skip noisy per-track logs in production; keep for debug.
+  if (debug) {
+    console.log(`[stream-resolve] Resolving track ${trackId} (json=${wantJson})`);
+  }
 
   try {
     const sc = getSoundCloudClient();
@@ -53,7 +56,7 @@ export async function GET(
       );
     }
 
-    console.log(`[stream-resolve] Track ${trackId} → type=${result.type}, url=${result.url.substring(0, 80)}...`);
+    console.log(`[stream-resolve] Track ${trackId} → type=${result.type}`);
 
     if (debug) {
       return NextResponse.json({

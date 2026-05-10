@@ -55,7 +55,11 @@ Radio Stream Endpoint         → Long-lived Node response (audio/mpeg)
    NEXT_PUBLIC_SITE_URL=http://localhost:3000
    ```
 
-4. **Run the SQL files in `database/`** in your Supabase SQL editor (in order).
+4. **Run the SQL files in `database/`** in your Supabase SQL editor (in order):
+   - `schema.sql`
+   - `migration_add_slug.sql`
+   - `migration_short_codes.sql`
+   - `migration_perf.sql` ← **important for fast page loads**
 
 5. **Run dev server:**
    ```bash

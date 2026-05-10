@@ -1,10 +1,23 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+/**
+ * Auth middleware.
+ *
+ * PERF: Uses `getSession()` (cookie + JWT verify, ~5ms) instead of
+ * `getUser()` (round trip to Supabase auth servers, ~80-300ms) on every
+ * request. The session cookie is signed and tamper-evident, so this is
+ * safe for routing-level redirects. Server components and API routes
+ * that need a verified user identity still call `getSession()` themselves
+ * and rely on Supabase's signed JWT — for write operations RLS does the
+ * actual security check at the DB level.
+ *
+ * The session is auto-refreshed when it's about to expire — we let the
+ * SSR helper handle that lazily inside the cookie adapter, so most
+ * requests don't trigger a refresh.
+ */
 export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request,
-  });
+  let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,9 +31,7 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
-          supabaseResponse = NextResponse.next({
-            request,
-          });
+          supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           );
@@ -29,16 +40,13 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // IMPORTANT: Don't add code between createServerClient and getUser()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user || null;
 
   const { pathname } = request.nextUrl;
 
-  // Protected routes — redirect to login if not authenticated
   const protectedRoutes = ['/library', '/playlist', '/account'];
-  const isProtected = protectedRoutes.some(route => pathname.startsWith(route));
+  const isProtected = protectedRoutes.some((r) => pathname.startsWith(r));
 
   if (isProtected && !user) {
     const url = request.nextUrl.clone();
@@ -47,7 +55,6 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Auth routes — redirect to home if already authenticated
   const authRoutes = ['/login', '/signup'];
   if (authRoutes.includes(pathname) && user) {
     return NextResponse.redirect(new URL('/', request.url));

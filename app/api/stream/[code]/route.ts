@@ -3,16 +3,16 @@
  *
  * URL: /stream/{code} or /stream/{code}.m3u
  *
- * Produces a standard M3U playlist suitable for VLC, browsers, mobile media
- * players, and any client that knows how to parse playlist files and follow
- * redirects.
+ * Standard M3U for VLC, browsers, mobile media players. NOT used by IMVU
+ * (IMVU's player needs the continuous /radio/{code}.mp3 endpoint).
  *
- * IMPORTANT: IMVU does NOT use this endpoint. IMVU only accepts continuous
- * Icecast-style MP3 streams — see /api/radio/[code] for the IMVU URL.
+ * The first entry of the M3U points back at the radio endpoint as a fallback
+ * for primitive clients that read only the first track of a playlist.
  *
- * As a courtesy fallback, the very first line of the playlist points back at
- * the radio endpoint so that any client that reads only the first entry of
- * an M3U (some old/limited players do this) still gets a valid stream.
+ * Performance:
+ *   - Playlist rows are cached in-process for 30s, so back-to-back hits
+ *     (e.g. user opens M3U twice, reload-on-error) skip the Supabase round
+ *     trip entirely.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -34,6 +34,30 @@ interface PlaylistRow {
   track_position: number;
 }
 
+const PLAYLIST_TTL_MS = 30 * 1000;
+const playlistCache = new Map<
+  string,
+  { rows: PlaylistRow[]; expiresAt: number }
+>();
+
+function getCachedPlaylist(code: string): PlaylistRow[] | null {
+  const e = playlistCache.get(code);
+  if (!e) return null;
+  if (Date.now() > e.expiresAt) {
+    playlistCache.delete(code);
+    return null;
+  }
+  return e.rows;
+}
+
+function setCachedPlaylist(code: string, rows: PlaylistRow[]): void {
+  if (playlistCache.size > 1000) {
+    const firstKey = playlistCache.keys().next().value;
+    if (firstKey !== undefined) playlistCache.delete(firstKey);
+  }
+  playlistCache.set(code, { rows, expiresAt: Date.now() + PLAYLIST_TTL_MS });
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ code: string }> }
@@ -46,17 +70,21 @@ export async function GET(
   }
 
   try {
-    const supabase = createAdminSupabaseClient();
+    let rows = getCachedPlaylist(code);
 
-    const { data: rawRows, error } = await supabase
-      .rpc('get_playlist_by_short_code', { p_code: code });
+    if (!rows) {
+      const supabase = createAdminSupabaseClient();
+      const { data: rawRows, error } = await supabase
+        .rpc('get_playlist_by_short_code', { p_code: code });
 
-    if (error) {
-      console.error('Database error:', error);
-      return new NextResponse('Failed to load playlist', { status: 500 });
+      if (error) {
+        console.error('Database error:', error);
+        return new NextResponse('Failed to load playlist', { status: 500 });
+      }
+
+      rows = (rawRows ?? []) as PlaylistRow[];
+      if (rows.length > 0) setCachedPlaylist(code, rows);
     }
-
-    const rows = (rawRows ?? []) as PlaylistRow[];
 
     if (rows.length === 0) {
       return new NextResponse(
@@ -72,9 +100,8 @@ export async function GET(
     const m3uLines: string[] = ['#EXTM3U'];
 
     // Courtesy fallback: first entry is the continuous radio stream, so any
-    // primitive client that only reads the first track of an .m3u (like some
-    // very old hardware players, or clients that mistake .m3u for a Shoutcast
-    // proxy) still gets a working stream URL.
+    // primitive client that only reads the first track of an .m3u still
+    // gets a working stream URL.
     m3uLines.push(`#EXTINF:-1,${playlistName} (Radio)`);
     m3uLines.push(`${baseUrl}/radio/${code}.mp3`);
 
@@ -89,10 +116,10 @@ export async function GET(
 
     const m3uContent = m3uLines.join('\n') + '\n';
 
+    // Fire-and-forget — never block the response on logging.
     logStreamAccess(code, request).catch(err =>
       console.error('Failed to log stream access:', err)
     );
-
     incrementPlayCount(playlistId).catch(err =>
       console.error('Failed to increment play count:', err)
     );
